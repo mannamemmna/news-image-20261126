@@ -8,7 +8,7 @@
 //
 // No network, no clock, no randomness: the same entry.png gives the same bytes.
 
-import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
