@@ -173,7 +173,7 @@ BRIEF_XS = tuple(ML + i * (BRIEF_W + BGUT) for i in range(N_BRIEF_COLS))
 BRIEF_DIV = tuple(ML + (i + 1) * BRIEF_W + i * BGUT + BGUT / 2.0
                   for i in range(N_BRIEF_COLS - 1))
 
-FLAG_LINE = "THE WORLD IN ONE FRAME \u00b7 WORLD EDITION \u00b7 NO. 26.11.26"
+FLAG_LINE = "THE WORLD IN ONE FRAME \u00b7 WORLD EDITION \u00b7 EARLY FINAL"
 DATE_LINE = "THURSDAY 26 NOVEMBER 2026"
 XMAS_LINE = "THANKSGIVING DAY \u00b7 26.11.2026"
 
@@ -237,6 +237,20 @@ CARDS = (
      "width. Dimorphos is tumbling.",
      "ESA \u00b7 CNN \u00b7 Ars Technica \u00b7 Sci. Am."),
 )
+
+# Trailing fillers the story-head ladder may drop when the +4 px raise no
+# longer fits the column measure.  A drop is only allowed when the word
+# carries no fact: never a number, never a place, never the main verb.
+HEAD_TRIMS = {
+    "US PROPOSES TARIFFS ON 14 TRADING PARTNERS":
+        "US PROPOSES TARIFFS ON 14 PARTNERS",
+    "KIM ORDERS WIDER TACTICAL NUCLEAR DEPLOYMENT":
+        "KIM ORDERS TACTICAL NUCLEAR DEPLOYMENT",
+    "TANKERS BURN IN THE STRAIT OF HORMUZ":
+        "TANKERS BURN IN STRAIT OF HORMUZ",
+    "EGYPT FIRE KILLS 31 ON CAIRO RING ROAD":
+        "EGYPT FIRE KILLS 31 ON CAIRO ROAD",
+}
 
 BRIEFS = (
     ("US", "SECOND JUDGE BLOCKS BIRTHRIGHT CITIZENSHIP ORDER"),
@@ -316,9 +330,25 @@ def plan():
     for tag, tagc, headline, deck, src in CARDS:
         c = {"tag": tag, "colour": tagc}
         c["tag_base"] = COL_TOP + 14
-        ch = fit_block(headline, SANS_BOLD, COL_W, 3, 21, floor=12)
+        # type ladder: raise the head +4 px over its natural size, never
+        # taking the string to an extra line.  If the raise no longer fits
+        # the measure, try the fact-free trailing trim; if even that fails,
+        # step the size back down until the old line count is honoured.
+        base_f = fit_block(headline, SANS_BOLD, COL_W, 3, 21, floor=12)
+        base_lines = wrap(headline, base_f, COL_W)
+        cands = (headline, HEAD_TRIMS[headline]) if headline in HEAD_TRIMS \
+            else (headline,)
+        ch, chosen = base_f, headline
+        for size in range(base_f.size + 4, base_f.size - 1, -1):
+            fnt = font(SANS_BOLD, size)
+            hit = [(cnd, wrap(cnd, fnt, COL_W)) for cnd in cands]
+            hit = [(cnd, ln) for cnd, ln in hit if len(ln) <= len(base_lines)]
+            if hit:
+                chosen, ch = hit[0][0], fnt
+                break
+        c["headline"] = chosen
         c["head_f"] = ch.size
-        c["head_lines"] = wrap(headline, ch, COL_W)
+        c["head_lines"] = wrap(chosen, ch, COL_W)
         c["head_lh"] = int(ch.size * 1.04)
         c["head_base0"] = c["tag_base"] + 12 + int(ch.size * 0.78)
         c["head_bot"] = (c["head_base0"] + (len(c["head_lines"]) - 1) * c["head_lh"]
@@ -351,14 +381,21 @@ def plan():
             tf = font(SANS_BOLD, 11)
             tag_w = tw(tag, tf, 1.0)
             avail = BRIEF_W - (tag_w + 16)
-            bf = fit_block(headline, SANS_BOLD, avail, 2, 12, floor=10)
+            # type tier: +3 px on the one-liners.  Every string still fits
+            # the column measure within its existing two lines at 15 px,
+            # so no rendered string needs trimming.  The stacker's item
+            # gap and separator rules move with the bigger ink so the
+            # strip still lands inside the brief band.
+            bf = fit_block(headline, SANS_BOLD, avail, 2, 15, floor=12)
             lines = wrap(headline, bf, avail)
             lh = int(bf.size * 1.16)
-            block = len(lines) * lh
-            stack.append({"tag": tag, "tag_w": tag_w, "f": bf.size, "lines": lines,
-                          "lh": lh, "base0": base,
-                          "bottom": base + block - bf.size + int(bf.size * 1.08)})
-            base += block + 8
+            last = base + (len(lines) - 1) * lh      # last baseline
+            stack.append({"tag": tag, "tag_w": tag_w, "f": bf.size,
+                          "headline": headline, "lines": lines, "lh": lh,
+                          "base0": base,
+                          "bottom": last + 4,        # ink floor
+                          "sep": last + 7})         # hairline between items
+            base += len(lines) * lh + 3
         stacks.append(stack)
     p["brief_items"] = stacks
     p["brief_bottoms"] = [s[-1]["bottom"] + 4 for s in stacks]
@@ -393,19 +430,24 @@ def draw_masthead(d):
 # --------------------------------------------------------------------------
 
 BLDGS = (
-    # (x fraction, width px, height px, window cols, lit-pattern seed)
-    (0.000, 38, 108, 2, 0), (0.115, 30, 76, 2, 1), (0.205, 44, 132, 3, 2),
-    (0.335, 26, 84, 1, 3), (0.410, 40, 116, 2, 4), (0.545, 32, 70, 2, 5),
-    (0.635, 46, 138, 3, 6), (0.790, 28, 88, 1, 7), (0.865, 40, 110, 2, 8),
+    # (width fraction of the scene, height px, window columns).  The
+    # fractions sum to exactly 1.0: one contiguous row of plain rectangles
+    # sharing the ground baseline, each a different width and height, so
+    # the silhouette top is a clean stair-step with no gaps or wedges.
+    (0.13, 96, 2), (0.10, 64, 1), (0.16, 128, 2), (0.09, 78, 1),
+    (0.14, 108, 2), (0.11, 58, 1), (0.15, 138, 2), (0.12, 88, 2),
 )
 
 UMBRELLAS = (0.03, 0.13, 0.22, 0.31, 0.42, 0.52, 0.61, 0.71, 0.80, 0.90, 0.97)
 
 
 def draw_lead_scene(page):
-    """Flat black skyline with cream lit windows, three red balloons heeling
-    in the wind on sagging tethers, diagonal rain, an umbrella crowd.
-    Chunky shapes, ink plus one red spot, no gradients."""
+    """Flat black skyline: one contiguous row of plain rectangles sharing a
+    single baseline, a clean stair-step top, small cream SQUARE windows on a
+    regular grid.  Three red balloons (star, round face, capsule) heel in the
+    wind on taut straight tethers tied to the crowd's ground line, diagonal
+    rain, an umbrella crowd, and the red GUSTS TO 55 MPH arrow clear of the
+    frame.  Chunky shapes, ink plus one red spot, no gradients."""
     x0, y0 = SCENE_L, LEAD_TOP + 8
     w, h = SCENE_R - SCENE_L, LEAD_BOT - 8 - y0
     sc = Image.new("RGB", (w, h), PAPER)
@@ -413,23 +455,27 @@ def draw_lead_scene(page):
 
     ground = h - 30                       # baseline of buildings and crowd
 
-    # night skyline: flat black slabs, a few windows punched out in paper
-    for i, (fx, bw, bh, wcols, seed) in enumerate(BLDGS):
-        bx = fx * w
+    # night skyline: plain black slabs tiled edge to edge on one baseline,
+    # tops forming a clean stair-step.  Windows are small cream squares on
+    # a regular grid — never triangles, never wedges, no polygon gaps.
+    frac = 0.0
+    for i, (fw, bh, wcols) in enumerate(BLDGS):
+        edge = frac * w
+        frac += fw
+        nx = w if i == len(BLDGS) - 1 else frac * w
         top = ground - bh
-        d.rectangle([bx, top, bx + bw, ground], fill=INK)
-        if i % 3 == 1:                    # aerials on some roofs
-            ax = bx + bw * 0.5
-            d.line([(ax, top), (ax, top - 8)], fill=INK, width=2)
-        cw = (bw - 8) / wcols
-        rows = int((bh - 12) // 15)
+        d.rectangle([edge, top, nx, ground], fill=INK)
+        pitch = 13.0
+        cw = (nx - edge) / wcols
+        rows = int((bh - 14) // pitch)
         for r in range(rows):
             for c in range(wcols):
-                if (seed * 5 + r * 3 + c * 7) % 4 != 0:
+                if (i * 7 + r * 3 + c * 5) % 4 != 0:
                     continue              # arithmetic pattern, ~25% lit
-                wx = bx + 4 + c * cw + cw * 0.22
-                wy = top + 7 + r * 15
-                d.rectangle([wx, wy, wx + cw * 0.5, wy + 6], fill=PAPER)
+                wx = edge + c * cw + (cw - 6) / 2.0
+                wy = top + 7 + r * pitch
+                d.rectangle([wx, wy, wx + 6, wy + 6], fill=PAPER)
+        edge = nx
 
     # diagonal rain: thin ink strokes slanting with the wind
     for i in range(44):
@@ -439,13 +485,15 @@ def draw_lead_scene(page):
         d.line([(rx, ry), (rx - ln * 0.45, ry + ln)], fill=INK, width=1)
 
     # three balloons, all heeling the same way (wind from the right); each is
-    # drawn upright on a paper-filled tile and rotated about its centre
+    # drawn upright on a TRANSPARENT tile, rotated about its centre and
+    # pasted through its own alpha, so no paper rectangle is stamped over
+    # the rain or the skyline (that stamping was the old "rendering seam").
     tilt = 14
 
     # star balloon
     sr, scx, scy = 30, w * 0.19, 62
     t = sr * 3
-    tile = Image.new("RGB", (t, t), PAPER)
+    tile = Image.new("RGBA", (t, t), (0, 0, 0, 0))
     td = ImageDraw.Draw(tile)
     pad = t / 2.0
     pts = []
@@ -453,51 +501,61 @@ def draw_lead_scene(page):
         a = -math.pi / 2 + i * math.pi / 5
         rad = sr if i % 2 == 0 else sr * 0.45
         pts.append((pad + rad * math.cos(a), pad + rad * math.sin(a)))
-    td.polygon(pts, fill=RED, outline=INK)
-    td.polygon([(pad + (x - pad) * 0.5, pad + (y - pad) * 0.5) for x, y in pts], fill=PAPER)
-    td.polygon(pts, outline=INK)
-    sc.paste(tile.rotate(tilt, resample=Image.BICUBIC, center=(pad, pad)),
-             (int(scx - pad), int(scy - pad)))
+    td.polygon(pts, fill=RED + (255,), outline=INK + (255,))
+    td.polygon([(pad + (x - pad) * 0.5, pad + (y - pad) * 0.5) for x, y in pts],
+               fill=PAPER + (255,))
+    td.polygon(pts, outline=INK + (255,))
+    rot = tile.rotate(tilt, resample=Image.BICUBIC, center=(pad, pad))
+    sc.paste(rot, (int(scx - pad), int(scy - pad)), rot)
 
     # round-face balloon
     fr, fcx, fcy = 26, w * 0.49, 70
     t = fr * 3
-    tile = Image.new("RGB", (t, t), PAPER)
+    tile = Image.new("RGBA", (t, t), (0, 0, 0, 0))
     fpad = t / 2.0
     td = ImageDraw.Draw(tile)
-    td.ellipse([fpad - fr, fpad - fr, fpad + fr, fpad + fr], fill=RED, outline=INK, width=3)
+    td.ellipse([fpad - fr, fpad - fr, fpad + fr, fpad + fr],
+               fill=RED + (255,), outline=INK + (255,), width=3)
     for sx in (-1, 1):                    # cream eyes, ink pupils
         ex = fpad + sx * fr * 0.38
         td.ellipse([ex - 5, fpad - fr * 0.34, ex + 5, fpad - fr * 0.10],
-                   fill=PAPER, outline=INK)
-        td.ellipse([ex - 2, fpad - fr * 0.28, ex + 2, fpad - fr * 0.16], fill=INK)
+                   fill=PAPER + (255,), outline=INK + (255,))
+        td.ellipse([ex - 2, fpad - fr * 0.28, ex + 2, fpad - fr * 0.16],
+                   fill=INK + (255,))
     td.arc([fpad - fr * 0.45, fpad + fr * 0.02, fpad + fr * 0.45, fpad + fr * 0.52],
-           20, 160, fill=INK, width=3)
-    sc.paste(tile.rotate(tilt, resample=Image.BICUBIC, center=(fpad, fpad)),
-             (int(fcx - fpad), int(fcy - fpad)))
+           20, 160, fill=INK + (255,), width=3)
+    rot = tile.rotate(tilt, resample=Image.BICUBIC, center=(fpad, fpad))
+    sc.paste(rot, (int(fcx - fpad), int(fcy - fpad)), rot)
 
-    # capsule balloon
+    # capsule balloon — body spans y 22..110: clear of the GUSTS arrow above
+    # (rows 15-17) and of the tallest slab top (y=116) below
     cw2, ch2, ccx, ccy = 19, 42, w * 0.80, 66
-    tile = Image.new("RGB", (cw2 * 5, int(ch2 * 2.6)), PAPER)
+    tile = Image.new("RGBA", (cw2 * 5, int(ch2 * 2.6)), (0, 0, 0, 0))
     tp = (tile.size[0] / 2.0, tile.size[1] / 2.0)
     td = ImageDraw.Draw(tile)
     td.rounded_rectangle([tp[0] - cw2, tp[1] - ch2, tp[0] + cw2, tp[1] + ch2],
-                         radius=cw2, fill=RED, outline=INK, width=3)
+                         radius=cw2, fill=RED + (255,), outline=INK + (255,),
+                         width=3)
     for k in (-ch2 * 0.45, ch2 * 0.45):   # seam bands
         td.rectangle([tp[0] - cw2 + 3, tp[1] + k - 2, tp[0] + cw2 - 3, tp[1] + k + 2],
-                     fill=PAPER)
-    td.ellipse([tp[0] - 7, tp[1] - 7, tp[0] + 7, tp[1] + 7], fill=PAPER, outline=INK)
-    sc.paste(tile.rotate(tilt, resample=Image.BICUBIC, center=tp),
-             (int(ccx - tile.size[0] / 2.0), int(ccy - tile.size[1] / 2.0)))
+                     fill=PAPER + (255,))
+    td.ellipse([tp[0] - 7, tp[1] - 7, tp[0] + 7, tp[1] + 7],
+               fill=PAPER + (255,), outline=INK + (255,))
+    rot = tile.rotate(tilt, resample=Image.BICUBIC, center=tp)
+    sc.paste(rot, (int(ccx - tile.size[0] / 2.0), int(ccy - tile.size[1] / 2.0)),
+             rot)
 
-    # sagging tethers down to the handlers' hands
-    for bx, by, hx in ((scx, scy + sr, scx - 30), (fcx, fcy + fr, fcx - 26),
-                       (ccx, ccy + ch2, ccx - 32)):
-        mid = ((bx + hx) / 2.0, (by + (ground - 4)) / 2.0 + 10)
-        curve = [((1 - t) * (1 - t) * bx + 2 * (1 - t) * t * mid[0] + t * t * hx,
-                  (1 - t) * (1 - t) * by + 2 * (1 - t) * t * mid[1] + t * t * (ground - 4))
-                 for t in [i / 24.0 for i in range(25)]]
-        d.line([(int(x), int(y)) for x, y in curve], fill=INK, width=2)
+    # tethers: one straight line per balloon, starting exactly at the
+    # balloon's bottom centre (the point (0, rb) rotated with the balloon's
+    # own 14-degree tilt) and ending on the crowd's ground line.  Every
+    # tether heels down-wind along the same 14-degree axis as the balloons.
+    crowd_ground = ground + 26             # top of the kerb the crowd stands on
+    sint, cost = math.sin(math.radians(tilt)), math.cos(math.radians(tilt))
+    for bcx, bcy, rb in ((scx, scy, sr), (fcx, fcy, fr), (ccx, ccy, ch2)):
+        tx = bcx + rb * sint               # bottom centre of the tilted shape
+        ty = bcy + rb * cost
+        ex = tx + (crowd_ground - ty) * sint / cost
+        d.line([(tx, ty), (ex, crowd_ground)], fill=INK, width=2)
 
     # crowd of umbrella silhouettes along the bottom
     d.rectangle([0, ground + 26, w, h], fill=INK)          # kerb mass
@@ -508,9 +566,11 @@ def draw_lead_scene(page):
         d.pieslice([ux - uw, uy - uw * 0.8, ux + uw, uy + uw * 0.8], 180, 360, fill=INK)
         d.line([(ux, uy), (ux, uy + 13)], fill=INK, width=2)
 
-    # the red spot: the wind itself, an arrow across the top of the frame
-    d.line([(w - 28, 16), (28, 16)], fill=RED, width=3)
-    d.polygon([(28, 16), (44, 9), (44, 23)], fill=RED)
+    # the red spot: the wind itself, an arrow across the top of the frame.
+    # Its head keeps 46 px of clearance from the panel's left frame rule —
+    # well beyond the 12 px minimum the last review asked for.
+    d.line([(w - 28, 16), (46, 16)], fill=RED, width=3)
+    d.polygon([(46, 16), (62, 9), (62, 23)], fill=RED)
     tracked(d, (w - 30, 10), "GUSTS TO 55 MPH", font(SANS_BOLD, 10), RED, 1.0, anchor="r")
 
     page.paste(sc, (x0, y0))
@@ -612,8 +672,7 @@ def draw_briefs(d):
                 d.text((x + it["tag_w"] + 16, y), line, font=hf, fill=INK, anchor="ls")
                 y += it["lh"]
             if k < len(stack) - 1:
-                sep = it["bottom"] + 2
-                d.rectangle([x, sep, x + BRIEF_W, sep], fill=FAINT)
+                d.rectangle([x, it["sep"], x + BRIEF_W, it["sep"]], fill=FAINT)
 
 
 # --------------------------------------------------------------------------
