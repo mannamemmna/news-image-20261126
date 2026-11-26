@@ -8,7 +8,7 @@
 //
 // No network, no clock, no randomness: the same entry.png gives the same bytes.
 
-import { copyFileSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -88,4 +88,8 @@ if (!written.equals(bytes)) {
 
 process.stdout.write(
   `entry.png copied to ${target}: ${bytes.length} bytes, ${width}x${height} px\n`,
+);
+process.stdout.write(
+  `validated: PNG signature, ${bytes.length}/${MAX_BYTES} bytes, ` +
+    `${width}x${height} within ${MAX_SIDE}x${MAX_SIDE}, copy identical\n`,
 );
