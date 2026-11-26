@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Front page of THE DAILY LEDGER for Thursday 26 November 2026.
 
-Draws a 1024x1024 newsprint-style page and writes identical bytes to
-./entry.png and ./output/entry.png.
+A classic LIGHT newsprint broadsheet: cream paper, black ink, one red spot
+colour and a single accent blue.  The page packs the day's whole news
+budget — a lead story with a drawn ink-and-red scene, six column stories,
+and a three-column "day in brief" strip of eighteen one-line items.
 
-The lead is a full-width night scene: a three-layer Manhattan skyline under a
-cold gradient sky, three giant parade balloons straining downwind on sagging
-tethers, rain, gust arcs, a lamp-lit crowd with umbrellas, and the headline
-sitting on a dark scrim across the lower third of the picture.
+Everything sits on one strict grid.  `plan()` measures every string with
+draw.textlength and fixes every baseline BEFORE a pixel is drawn, and the
+audits re-check that same plan, so the drawing and the checking can never
+disagree and the run refuses to save on any overflow or collision.
+No rounded cards, no dark panels, no gradients.
 
-Deterministic by construction: the date is a constant, the palette is fixed,
-every coordinate is arithmetic, and there is no random, clock or network call.
-Pillow is the only dependency.
+Deterministic by construction: the date is a constant, the palette is
+fixed, every coordinate is arithmetic, and there is no random, clock or
+network call.  Pillow is the only dependency.
 """
 
 import math
@@ -21,37 +24,18 @@ from PIL import Image, ImageDraw, ImageFont
 
 SIDE = 1024
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
-LIB_DIR = "/usr/share/fonts/truetype/liberation"
 SERIF_BOLD = os.path.join(FONT_DIR, "DejaVuSerif-Bold.ttf")
-SANS_BOLD = os.path.join(LIB_DIR, "LiberationSans-Bold.ttf")
-SANS = os.path.join(LIB_DIR, "LiberationSans-Regular.ttf")
+SANS_BOLD = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
+SANS = os.path.join(FONT_DIR, "DejaVuSans.ttf")
 
-# Palette: deep navy ground, cream type, one crimson band, amber accents.
-BG = (11, 18, 32)
-CREAM = (242, 235, 220)
-CREAM_SOFT = (216, 208, 192)
-DIM = (128, 136, 152)
-RULE = (58, 68, 86)
-CRIMSON = (142, 27, 27)
-AMBER = (232, 163, 61)
-RED = (226, 96, 84)
-INK = (10, 14, 24)
-STEEL = (108, 118, 136)
-STEEL_DARK = (74, 84, 102)
-BLUE = (38, 86, 150)
-ORANGE = (188, 96, 34)
-TAG_TRADE = (150, 100, 34)
-TAG_ASIA = (162, 38, 38)
-
-# Scene palette.
-SKY_TOP = (12, 20, 36)
-SKY_BOT = (51, 65, 94)
-FAR = (80, 96, 126)
-FAR_EDGE = (96, 112, 142)
-MID = (26, 36, 57)
-NEAR = (10, 14, 23)
-WIN_MID = (226, 178, 96)
-WIN_NEAR = (250, 206, 132)
+# Palette: cream newsprint, black ink, muted rule, one red spot, one blue.
+PAPER = (244, 239, 227)          # F4EFE3
+INK = (21, 22, 26)               # 15161A
+MUTED = (138, 133, 119)          # 8A8577
+RED = (179, 38, 30)              # B3261E
+BLUE = (47, 79, 111)             # 2F4F6F
+SOFT = (63, 64, 68)              # body-copy grey-black
+FAINT = (210, 203, 186)          # hairline between brief items
 
 MEASURE = ImageDraw.Draw(Image.new("RGB", (8, 8)))
 
@@ -94,49 +78,54 @@ def fit_size(text, path, max_w, start, floor=8, tracking=0.0):
     return size
 
 
-def wrap(text, fnt, max_w):
-    """Greedy word wrap; a single over-long word is kept whole on its line."""
+def wrap(text, fnt, max_w, tracking=0.0):
+    """Greedy word wrap that honours letterspacing.
+
+    A single over-long word is kept whole, except that a word carrying
+    hyphens may break after a hyphen — the broadsheet convention — so
+    compounds such as STADIUM-SIZED or 3,000-TROOP set in a narrow
+    column without clipping.
+    """
+    def w(s):
+        return MEASURE.textlength(s, font=fnt) + tracking * max(0, len(s) - 1)
+
     lines, cur = [], ""
     for word in text.split(" "):
         trial = word if not cur else cur + " " + word
-        if not cur or MEASURE.textlength(trial, font=fnt) <= max_w:
+        if not cur or w(trial) <= max_w:
             cur = trial
-        else:
+            continue
+        if w(word) > max_w and "-" in word[:-1]:
+            parts, seg = [], ""
+            for piece in word.split("-"):
+                cand = piece + "-" if seg == "" else seg + "-" + piece
+                if seg and w(cand) > max_w:
+                    parts.append(seg + "-")
+                    seg = piece
+                else:
+                    seg = cand
+            parts.append(seg)
             lines.append(cur)
-            cur = word
+            cur = parts[0]
+            for p in parts[1:-1]:
+                lines.append(p)
+            continue
+        lines.append(cur)
+        cur = word
     if cur:
         lines.append(cur)
     return lines
 
 
-def fit_block(text, path, max_w, max_lines, start, floor=8):
+def fit_block(text, path, max_w, max_lines, start, floor=8, tracking=0.0):
     """Largest font whose wrapped text fits max_w within max_lines."""
     size = int(start)
     while size > floor:
         fnt = font(path, size)
-        if len(wrap(text, fnt, max_w)) <= max_lines:
+        if len(wrap(text, fnt, max_w, tracking)) <= max_lines:
             return fnt
         size -= 1
     return font(path, floor)
-
-
-def balanced_wrap(text, fnt, max_w, want):
-    """Greedy wrap at the narrowest measure that still holds `want` lines.
-
-    Removes the long-line/short-orphan look of a plain greedy wrap without
-    touching a single word of the copy.
-    """
-    lines = wrap(text, fnt, max_w)
-    if len(lines) >= want:
-        return lines
-    lo, hi, best = int(max_w * 0.40), int(max_w), max_w
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        if len(wrap(text, fnt, mid)) <= want:
-            best, hi = mid, mid - 1
-        else:
-            lo = mid + 1
-    return wrap(text, fnt, best)
 
 
 def split_two(text, fnt, max_w):
@@ -154,800 +143,631 @@ def split_two(text, fnt, max_w):
 
 
 # --------------------------------------------------------------------------
-# small drawing utilities used by the scene
+# page geometry: one strict grid, four horizontal bands
 # --------------------------------------------------------------------------
 
-def lerp(a, b, t):
-    return tuple(int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
+ML, MR = 14, 1010                 # page margins (left ink edge, right ink edge)
 
+LEAD_TOP = 186
+LEAD_BOT = 486
+COL_TOP = 496
+COL_BOT = 686
+BRIEF_TOP = 696
+BRIEF_BOT = 958
+FOOT_RULE = 970
 
-def gradient(w, h, top, bottom):
-    """Per-row linear interpolation, drawn one pixel wide then stretched."""
-    strip = Image.new("RGB", (1, h))
-    px = strip.load()
-    for y in range(h):
-        px[0, y] = lerp(top, bottom, y / float(max(1, h - 1)))
-    return strip.resize((w, h), Image.BILINEAR)
+DIV_X = 646                       # hairline between lead text and the scene
+TEXT_L, TEXT_R = ML, 630          # lead text column
+SCENE_L, SCENE_R = 662, MR        # lead illustration box
 
+N_COLS = 6
+GUT = 10
+COL_W = (MR - ML - (N_COLS - 1) * GUT) / N_COLS            # ~156.7
+COL_XS = tuple(ML + i * (COL_W + GUT) for i in range(N_COLS))
+COL_DIV = tuple(ML + (i + 1) * COL_W + i * GUT + GUT / 2.0 for i in range(N_COLS - 1))
 
-def soft_disc(img, cx, cy, rx, ry, colour, peak, scale=4):
-    """Radial falloff drawn as a mask on a small image, then pasted up."""
-    sw = max(4, int(rx * 2 * scale / 4))
-    sh = max(4, int(ry * 2 * scale / 4))
-    mask = Image.new("L", (sw, sh))
-    vals = []
-    for yy in range(sh):
-        dy = (yy + 0.5 - sh / 2.0) / (sh / 2.0)
-        dy2 = dy * dy
-        for xx in range(sw):
-            dx = (xx + 0.5 - sw / 2.0) / (sw / 2.0)
-            r = math.sqrt(dx * dx + dy2)
-            vals.append(0 if r >= 1.0 else int(((1.0 - r) ** 2) * peak * 255))
-    mask.putdata(vals)
-    mask = mask.resize((max(1, int(rx * 2)), max(1, int(ry * 2))), Image.BILINEAR)
-    patch = Image.new("RGBA", mask.size, colour + (255,))
-    img.paste(patch, (int(cx - rx), int(cy - ry)), mask)
+N_BRIEF_COLS = 3
+BGUT = 14
+BRIEF_W = (MR - ML - (N_BRIEF_COLS - 1) * BGUT) / N_BRIEF_COLS      # ~322.7
+BRIEF_XS = tuple(ML + i * (BRIEF_W + BGUT) for i in range(N_BRIEF_COLS))
+BRIEF_DIV = tuple(ML + (i + 1) * BRIEF_W + i * BGUT + BGUT / 2.0
+                  for i in range(N_BRIEF_COLS - 1))
 
-
-def vertical_ramp(w, h, colour, a_top, a_bottom):
-    """A vertical alpha ramp in one colour, used for haze and soft scrims."""
-    strip = Image.new("RGBA", (1, h))
-    px = strip.load()
-    for y in range(h):
-        t = y / float(max(1, h - 1))
-        px[0, y] = colour + (int(round(a_top + (a_bottom - a_top) * t)),)
-    return strip.resize((w, h), Image.BILINEAR)
-
-
-def bezier(p0, p1, p2, n=28):
-    pts = []
-    for i in range(n + 1):
-        t = i / float(n)
-        u = 1.0 - t
-        pts.append((u * u * p0[0] + 2 * u * t * p1[0] + t * t * p2[0],
-                    u * u * p0[1] + 2 * u * t * p1[1] + t * t * p2[1]))
-    return pts
-
-
-def polyline(d, pts, fill, width=1):
-    d.line([(int(x), int(y)) for x, y in pts], fill=fill, width=width, joint="curve")
-
-
-def star_points(cx, cy, r, inner=0.45, phase=-math.pi / 2):
-    pts = []
-    for i in range(10):
-        ang = phase + i * math.pi / 5
-        rad = r if i % 2 == 0 else r * inner
-        pts.append((cx + rad * math.cos(ang), cy + rad * math.sin(ang)))
-    return pts
-
+FLAG_LINE = "THE WORLD IN ONE FRAME \u00b7 WORLD EDITION \u00b7 NO. 26.11.26"
+DATE_LINE = "THURSDAY 26 NOVEMBER 2026"
+XMAS_LINE = "THANKSGIVING DAY \u00b7 26.11.2026"
 
 # --------------------------------------------------------------------------
-# masthead plate and date band
+# text package (the only facts allowed on this page)
 # --------------------------------------------------------------------------
 
-def draw_head(d):
-    d.rectangle([16, 10, 1008, 13], fill=AMBER)
-
-    tracked(d, (16, 38), "THE WORLD IN ONE FRAME", font(SANS_BOLD, 19), AMBER, 4.6)
-
-    we = font(SANS_BOLD, 20)
-    we_w = tracked(d, (1008, 38), "WORLD EDITION", we, AMBER, 2.0, anchor="r")
-    tracked(d, (1008 - we_w - 22, 38), "NO. 26.11.26", font(SANS, 17), CREAM_SOFT, 1.4, anchor="r")
-
-    size = fit_size("THE DAILY LEDGER", SERIF_BOLD, 990, 88)
-    mast = font(SERIF_BOLD, size)
-    baseline = 46 + int(size * 0.84)
-    tracked(d, (16, baseline), "THE DAILY LEDGER", mast, CREAM, 0.0)
-    d.rectangle([16, baseline + 12, 1008, baseline + 13], fill=RULE)
-    return baseline + 13
-
-
-BAND_TOP = 141
-BAND_H = 54
-
-
-def draw_date_band(d, top, height=BAND_H):
-    d.rectangle([0, top, SIDE, top + height], fill=CRIMSON)
-    d.rectangle([0, top, SIDE, top + 2], fill=(178, 46, 40))
-
-    label = "THURSDAY 26 NOVEMBER 2026"
-    size = fit_size(label, SANS_BOLD, 660, 42, tracking=2.0)
-    tracked(d, (24, top + 43), label, font(SANS_BOLD, size), (255, 252, 245), 2.0)
-    tracked(d, (1000, top + 41), "THANKSGIVING DAY",
-            font(SANS_BOLD, 18), (250, 226, 214), 1.4, anchor="r")
-
-
-# --------------------------------------------------------------------------
-# hero illustration
-# --------------------------------------------------------------------------
-
-HERO = (16, BAND_TOP + BAND_H + 8, 1008, BAND_TOP + BAND_H + 8 + 328)
-SCENE_H = HERO[3] - HERO[1]
-VIS = 198            # visible illustration above the scrim
-SCRIM_TOP = HERO[1] + VIS
-SCRIM_H = HERO[3] - SCRIM_TOP
-
-FAR_BASE = 174
-MID_BASE = 183
-NEAR_BASE = 191
-
-FAR_BLOCKS = (
-    (0.000, 0.090, 72), (0.072, 0.068, 58), (0.132, 0.050, 66),
-    (0.172, 0.082, 54), (0.242, 0.058, 80), (0.292, 0.086, 62),
-    (0.368, 0.050, 74), (0.410, 0.080, 56), (0.480, 0.058, 68),
-    (0.530, 0.090, 60), (0.610, 0.048, 78), (0.650, 0.078, 54),
-    (0.720, 0.058, 70), (0.770, 0.088, 64), (0.850, 0.050, 58),
-    (0.892, 0.078, 76), (0.962, 0.048, 62),
+LEAD_KICKER = "NEW YORK \u00b7 THE PARADE THAT WAITED"
+LEAD_HEAD = "MACY\u2019S 100TH PARADE POSTPONED TO SATURDAY"
+LEAD_DECK = (
+    "A nor\u2019easter and a high-wind warning with gusts to 55 mph grounded the giant "
+    "balloons, so the Thanksgiving Day parade moves to Saturday 28 November \u2014 the "
+    "first weather postponement in its 100-year history. It was halted only for "
+    "WWII, 1942-44."
 )
-
-MID_BLOCKS = (
-    (0.020, 0.070, 52), (0.098, 0.058, 44), (0.168, 0.078, 58),
-    (0.256, 0.058, 40), (0.326, 0.068, 50), (0.404, 0.048, 62),
-    (0.462, 0.078, 44), (0.552, 0.058, 54), (0.622, 0.068, 38),
-    (0.702, 0.058, 60), (0.772, 0.078, 48), (0.862, 0.058, 42),
-    (0.932, 0.058, 56),
+LEAD_P1 = (
+    "The parade will now march on Saturday 28 November, one day after "
+    "Thanksgiving Day, 26.11.2026. The giant balloons stayed grounded: a "
+    "nor\u2019easter arrived with a high-wind warning, gusts to 55 mph."
 )
-
-NEAR_BLOCKS = (
-    (0.000, 0.098, 40), (0.118, 0.068, 30), (0.198, 0.088, 44),
-    (0.298, 0.058, 34), (0.376, 0.098, 38), (0.494, 0.068, 28),
-    (0.574, 0.088, 46), (0.682, 0.058, 32), (0.752, 0.098, 40),
-    (0.868, 0.078, 28), (0.946, 0.050, 42),
+LEAD_P2 = (
+    "It is the first weather postponement in the parade\u2019s 100-year history. "
+    "In all that time the parade was halted only for WWII, 1942-44. The 100th "
+    "edition had been set for New York on Thanksgiving Day itself."
 )
-
-# (x fraction, body height, umbrella?)
-CROWD = (
-    (0.012, 32, 1), (0.072, 27, 0), (0.130, 35, 1), (0.192, 29, 1),
-    (0.252, 33, 0), (0.310, 28, 1), (0.370, 36, 1), (0.434, 30, 0),
-    (0.494, 34, 1), (0.560, 29, 1), (0.620, 32, 0), (0.682, 35, 1),
-    (0.744, 28, 1), (0.804, 33, 0), (0.870, 30, 1), (0.938, 34, 1),
-)
-
-
-def _windows(d, x, top, w, base, lit, colour, seed, cell=6, ww=1):
-    """Warm windows on an arithmetic grid."""
-    cols = int((w - 6) // cell)
-    rows = int((base - top - 8) // (cell + 2))
-    for r in range(rows):
-        for c in range(cols):
-            if (seed * 7 + r * 5 + c * 3) % 11 >= lit:
-                continue
-            wx = x + 4 + c * cell
-            wy = top + 6 + r * (cell + 2)
-            if wy + ww > base - 3:
-                continue
-            d.rectangle([wx, wy, wx + ww, wy + ww], fill=colour)
-
-
-def draw_skyline(sc, w):
-    """Three flat layers, each pushed back with haze and rim light."""
-    d = ImageDraw.Draw(sc)
-
-    # far layer: pale, tall, hazy mass behind everything
-    for i, (fx, fw, fh) in enumerate(FAR_BLOCKS):
-        x = fx * w
-        bw = fw * w
-        top = FAR_BASE - fh
-        d.rectangle([x, top, x + bw, FAR_BASE], fill=FAR)
-        d.rectangle([x, top, x + bw, top + 1], fill=FAR_EDGE)
-        if i % 4 == 1:
-            d.rectangle([x + bw * 0.42, top - 6, x + bw * 0.42 + 2, top], fill=FAR_EDGE)
-
-    # thick haze at the far layer's feet: atmospheric perspective
-    sc.alpha_composite(vertical_ramp(w, 84, (56, 72, 104), 0, 96), (0, 92))
-
-    # mid layer: navy, dim windows, cool rim
-    for i, (fx, fw, fh) in enumerate(MID_BLOCKS):
-        x = fx * w
-        bw = fw * w
-        top = MID_BASE - fh
-        d.rectangle([x, top, x + bw, MID_BASE], fill=MID)
-        d.rectangle([x, top, x + bw, top + 1], fill=(58, 76, 108))
-        _windows(d, int(x), int(top), int(bw), MID_BASE, 2, WIN_MID, i)
-
-    # thinner veil in front of the mid layer
-    sc.alpha_composite(vertical_ramp(w, 54, (44, 58, 88), 0, 44), (0, 128))
-
-    # near layer: near-black, warm backlit rim, a few bright windows
-    for i, (fx, fw, fh) in enumerate(NEAR_BLOCKS):
-        x = fx * w
-        bw = fw * w
-        top = NEAR_BASE - fh
-        d.rectangle([x, top, x + bw, NEAR_BASE], fill=NEAR)
-        d.rectangle([x, top, x + bw, top + 1], fill=(138, 106, 64))
-        _windows(d, int(x), int(top), int(bw), NEAR_BASE, 2, WIN_NEAR, i + 3, ww=2)
-        if i % 4 == 2:
-            ax = x + bw * 0.5
-            d.line([(ax, top), (ax, top - 18)], fill=(44, 40, 38), width=1)
-            d.line([(ax, top - 18), (ax, top - 14)], fill=(150, 74, 58), width=1)
-
-
-def draw_crowd(sc, w):
-    d = ImageDraw.Draw(sc)
-
-    # two warm lamp glows behind the crowd
-    for fx in (0.205, 0.628):
-        lx = fx * w
-        soft_disc(sc, lx, VIS - 30, 104, 70, (188, 124, 52), 0.72)
-        soft_disc(sc, lx, VIS - 34, 46, 34, (246, 190, 104), 0.72)
-        d.line([(lx, VIS - 46), (lx, VIS - 2)], fill=(30, 24, 20), width=2)
-        d.rectangle([lx - 5, VIS - 52, lx + 5, VIS - 44], fill=(58, 42, 28))
-
-    for fx, bh, umb in CROWD:
-        cx = fx * w
-        top = VIS - bh
-        d.rounded_rectangle([cx - bh * 0.21, top + bh * 0.28, cx + bh * 0.21, VIS + 2],
-                            radius=bh * 0.15, fill=(3, 5, 9))
-        d.ellipse([cx - bh * 0.12, top, cx + bh * 0.12, top + bh * 0.27], fill=(3, 5, 9))
-        if umb:
-            uw = bh * 0.62
-            uy = top + bh * 0.04
-            box = [cx - uw, uy - uw * 0.78, cx + uw, uy + uw * 0.78]
-            d.pieslice(box, 180, 360, fill=(5, 7, 12))
-            d.arc(box, 182, 358, fill=(184, 144, 96), width=2)
-            d.line([(cx, uy), (cx, VIS - bh * 0.34)], fill=(9, 11, 17), width=1)
-
-    # kerb line so the crowd is not glued to the caption block
-    d.rectangle([0, VIS - 3, w, VIS - 2], fill=(52, 58, 74))
-
-
-def _balloon_star(r):
-    pad = int(r * 1.55)
-    tile = Image.new("RGBA", (pad * 2, pad * 2), (0, 0, 0, 0))
-    dt = ImageDraw.Draw(tile)
-    dt.polygon(star_points(pad, pad, r), fill=(168, 34, 34), outline=(240, 232, 214))
-    dt.polygon(star_points(pad, pad, r * 0.88), fill=(238, 190, 74))
-    dt.polygon(star_points(pad, pad, r * 0.38), fill=(248, 216, 122))
-    return tile, pad
-
-
-def _balloon_head(r):
-    pad = int(r * 1.55)
-    tile = Image.new("RGBA", (pad * 2, pad * 2), (0, 0, 0, 0))
-    dt = ImageDraw.Draw(tile)
-    dt.ellipse([pad - r, pad - r * 0.92, pad + r, pad + r * 0.92],
-               fill=(196, 62, 54), outline=(240, 232, 214), width=2)
-    dt.ellipse([pad - r * 0.66, pad - r * 0.56, pad + r * 0.66, pad + r * 0.34],
-               fill=(212, 76, 66))
-    for sx in (-1, 1):
-        ex = pad + sx * r * 0.34
-        dt.ellipse([ex - r * 0.19, pad - r * 0.30, ex + r * 0.19, pad + r * 0.02], fill=(250, 246, 238))
-        dt.ellipse([ex - r * 0.075, pad - r * 0.15, ex + r * 0.075, pad + r * 0.0], fill=(24, 20, 26))
-    dt.arc([pad - r * 0.42, pad + r * 0.02, pad + r * 0.42, pad + r * 0.50],
-           18, 162, fill=(250, 246, 238), width=4)
-    return tile, pad
-
-
-def _balloon_tube(bw, bh):
-    pad = int(max(bw, bh) * 0.80)
-    tile = Image.new("RGBA", (pad * 2, pad * 2), (0, 0, 0, 0))
-    dt = ImageDraw.Draw(tile)
-    top, bot = pad - bh / 2, pad + bh / 2
-    dt.rounded_rectangle([pad - bw / 2, top, pad + bw / 2, bot],
-                         radius=bw / 2, fill=(96, 142, 194), outline=(240, 232, 214), width=2)
-    # lit flank
-    dt.rounded_rectangle([pad - bw / 2 + 4, top + 7, pad - bw / 2 + bw * 0.34, bot - 7],
-                         radius=bw * 0.17, fill=(136, 180, 222))
-    # shadow flank, so it separates from the blue-grey skyline
-    dt.rounded_rectangle([pad + bw / 2 - bw * 0.30, top + 7, pad + bw / 2 - 4, bot - 7],
-                         radius=bw * 0.15, fill=(40, 64, 104))
-    # seams, drawn as full-width bands with rounded ends
-    for k in (0.24, 0.76):
-        yy = top + bh * k
-        dt.rectangle([pad - bw / 2 + 1, yy - 1, pad + bw / 2 - 1, yy + 1], fill=(240, 232, 214))
-    # nose and tail caps
-    dt.ellipse([pad - bw / 2 + 3, top + 3, pad + bw / 2 - 3, top + bw * 0.5], outline=(214, 206, 190), width=1)
-    dt.ellipse([pad - bw / 2 + 3, bot - bw * 0.5, pad + bw / 2 - 3, bot - 3], outline=(214, 206, 190), width=1)
-    # tail fin so it reads as a balloon and not a pill
-    dt.polygon([(pad - 3, bot - 2), (pad + 3, bot - 2), (pad + 1, bot + 9), (pad - 1, bot + 9)],
-               fill=(240, 232, 214))
-    return tile, pad
-
-
-def draw_balloons(img, w):
-    """Three giant balloons, all leaning the same way, each on a sagging tether."""
-    d = ImageDraw.Draw(img)
-
-    # (centre x px, centre y px, radius, lean, tether start, hand)
-    star_x, star_y, star_r = 0.212 * w, 76, 54
-    head_x, head_y, head_r = 0.490 * w, 82, 48
-    tube_x, tube_y = 0.792 * w, 84
-
-    rig = (
-        ((star_x, star_y + star_r - 2), (star_x - 62, 188), star_r),
-        ((head_x, head_y + head_r - 2), (head_x - 58, 190), head_r),
-        ((tube_x, tube_y + 64), (tube_x - 60, 186), 30),
-    )
-    for (bx, by), hand, half in rig:
-        # harness: three short lines gathering at the balloon's base
-        for off in (-half * 0.5, 0.0, half * 0.5):
-            d.line([(bx + off, by - 10), (bx, by + 2)], fill=(214, 204, 186, 170), width=1)
-        p2 = (hand[0], hand[1])
-        mid = ((bx + p2[0]) / 2.0, (by + p2[1]) / 2.0 + 13)
-        ctrl = (mid[0] - (bx - p2[0]) * 0.06, mid[1])
-        polyline(d, bezier((bx, by + 2), ctrl, p2), (232, 222, 202, 205), 2)
-        # gloved hand at the end of the line, on a raised arm
-        d.line([(p2[0], p2[1] + 18), (p2[0], p2[1])], fill=(3, 5, 9), width=4)
-        d.rounded_rectangle([p2[0] - 3, p2[1] - 10, p2[0] + 3, p2[1]], radius=3,
-                            fill=(12, 14, 22))
-        d.line([(p2[0] - 3, p2[1] - 10), (p2[0] + 3, p2[1] - 10)], fill=(196, 152, 104), width=1)
-
-    for make, angle, fx, fy in (
-        (lambda: _balloon_star(star_r), 13, star_x, star_y),
-        (lambda: _balloon_head(head_r), 15, head_x, head_y),
-        (lambda: _balloon_tube(58, 128), 15, tube_x, tube_y),
-    ):
-        tile, pad = make()
-        tile = tile.rotate(angle, resample=Image.BICUBIC)
-        img.alpha_composite(tile, (int(fx - pad), int(fy - pad)))
-
-
-def draw_scene(page, box):
-    x0, y0, x1, y1 = box
-    w, h = x1 - x0, y1 - y0
-    sc = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    sc.paste(gradient(w, h, SKY_TOP, SKY_BOT), (0, 0))
-
-    # amber glow low behind the skyline
-    soft_disc(sc, int(w * 0.70), 176, 260, 92, (138, 90, 34), 0.66)
-    soft_disc(sc, int(w * 0.24), 182, 200, 66, (128, 82, 30), 0.44)
-
-    # gust arcs, pale blue, long and broken
-    d = ImageDraw.Draw(sc)
-    for ax, ay, ln, rise in ((0.02, 0.12, 0.28, 16), (0.18, 0.32, 0.30, -12),
-                             (0.54, 0.18, 0.32, 14), (0.04, 0.50, 0.26, -10),
-                             (0.64, 0.46, 0.30, 12)):
-        p0 = (ax * w, ay * VIS)
-        p1 = ((ax + ln * 0.5) * w, (ay * VIS) + rise)
-        p2 = ((ax + ln) * w, (ay * VIS) + rise * 0.2)
-        pts = bezier(p0, p1, p2, 40)
-        for a, b in ((0, 13), (18, 28), (33, 40)):
-            polyline(d, pts[a:b], (150, 174, 206, 112), 3)
-
-    draw_skyline(sc, w)
-    draw_crowd(sc, w)
-
-    # rain, clipped above the scrim
-    rain = Image.new("RGBA", (w, VIS + 4), (0, 0, 0, 0))
-    dr = ImageDraw.Draw(rain)
-    for i in range(48):
-        rx = ((i * 197 + 41) % (w + 60)) - 30
-        ry = (i * 103 + 13) % 186
-        ln = 10 + (i * 7) % 9
-        dr.line([(rx, ry), (rx - ln * 0.5, ry + ln * 0.87)], fill=(186, 206, 234, 58), width=1)
-    sc.alpha_composite(rain, (0, 0))
-
-    draw_balloons(sc, w)
-
-    # crimson 100th stamp, tilted, top right
-    r = 44
-    pad = int(r * 1.7)
-    stamp = Image.new("RGBA", (pad * 2, pad * 2), (0, 0, 0, 0))
-    ds = ImageDraw.Draw(stamp)
-    ds.ellipse([pad - r, pad - r, pad + r, pad + r], fill=(112, 24, 24, 240),
-               outline=(226, 218, 202, 240), width=3)
-    ds.ellipse([pad - r + 6, pad - r + 6, pad + r - 6, pad + r - 6],
-               outline=(226, 218, 202, 110), width=2)
-    ds.text((pad, pad - 1), "100th", font=font(SANS_BOLD, 21), fill=(246, 240, 228, 255), anchor="mm")
-    stamp = stamp.rotate(-8, resample=Image.BICUBIC)
-    sc.alpha_composite(stamp, (int(w * 0.948 - pad), int(0.150 * VIS - pad)))
-
-    page.alpha_composite(sc, (x0, y0))
-
-
-# --------------------------------------------------------------------------
-# hero panel: scrim, kicker, headline, deck
-# --------------------------------------------------------------------------
-
-HERO_DECK = (
-    "Thanksgiving Day parade pushed to Saturday 28 November as a nor\u2019easter and a "
-    "high-wind warning (gusts to 55 mph) ground the giant balloons \u2014 the first weather "
-    "postponement in its 100-year history. The parade was only ever halted for WWII, 1942-44."
-)
-
-HEAD_L1 = "MACY\u2019S 100TH PARADE"
-HEAD_L2 = "POSTPONED TO SATURDAY"
-
-HEAD_X = HERO[0] + 18
-HEAD_MAX = 552
-DECK_X = HERO[0] + 573
-DECK_MAX = HERO[2] - DECK_X - 24
-DECK_LINES = 5
-
-
-def draw_hero(page):
-    draw_scene(page, HERO)
-    x0, y0, x1, y1 = HERO
-
-    # scrim: the picture dissolves into the caption block over 18 px, then holds
-    scrim = vertical_ramp(x1 - x0, 22, (6, 9, 16), 0, 206)
-    page.alpha_composite(scrim, (x0, SCRIM_TOP))
-    solid = Image.new("RGBA", (x1 - x0, SCRIM_H - 22), (6, 9, 16, 206))
-    page.alpha_composite(solid, (x0, SCRIM_TOP + 22))
-    d = ImageDraw.Draw(page)
-
-    tracked(d, (HEAD_X, SCRIM_TOP + 28), "UNITED STATES \u00b7 NEW YORK",
-            font(SANS_BOLD, 19), (236, 96, 74), 2.4)
-
-    size = fit_size(HEAD_L2, SANS_BOLD, HEAD_MAX, 42, tracking=0.5)
-    head = font(SANS_BOLD, size)
-    lh = int(size * 1.10)
-    b1 = SCRIM_TOP + 76
-    tracked(d, (HEAD_X, b1), HEAD_L1, head, CREAM, 0.5)
-    tracked(d, (HEAD_X, b1 + lh), HEAD_L2, head, CREAM, 0.5)
-
-    d.rectangle([DECK_X - 14, SCRIM_TOP + 22, DECK_X - 13, SCRIM_TOP + SCRIM_H - 16], fill=(64, 72, 90))
-
-    deck_f = fit_block(HERO_DECK, SANS, DECK_MAX, DECK_LINES, 18)
-    lines = balanced_wrap(HERO_DECK, deck_f, DECK_MAX, DECK_LINES)
-    lh_d = int(deck_f.size * 1.24)
-    cap = int(deck_f.size * 0.72)
-    total = (len(lines) - 1) * lh_d + cap
-    dy = SCRIM_TOP + 22 + max(0, (SCRIM_H - 22 - total) // 2) + cap
-    for line in lines:
-        d.text((DECK_X, dy), line, font=deck_f, fill=(216, 209, 196), anchor="ls")
-        dy += lh_d
-    return b1 + lh
-
-
-# --------------------------------------------------------------------------
-# card mini-scenes (drawn on a 64-unit grid, scaled to `s`)
-# --------------------------------------------------------------------------
-
-def _horizon(d, bx, by, u, y, alpha=70):
-    d.line([(bx + 2 * u, by + y * u), (bx + 62 * u, by + y * u)],
-           fill=(96, 112, 140, alpha), width=max(1, int(u)))
-
-
-def g_trade(d, bx, by, s):
-    u = s / 64.0
-    _horizon(d, bx, by, u, 34)
-    d.rectangle([bx, by + 52 * u, bx + 64 * u, by + 64 * u], fill=(16, 24, 38))
-    cols = ((186, 108, 44), (150, 54, 48), (58, 96, 140))
-    for r in range(2):
-        for c in range(3):
-            x = bx + 8 * u + c * 15 * u
-            y = by + 24 * u + r * 10 * u
-            d.rectangle([x, y, x + 13 * u, y + 8 * u], fill=cols[(r + c) % 3],
-                        outline=(232, 226, 212))
-    d.polygon([(bx + 4 * u, by + 45 * u), (bx + 60 * u, by + 45 * u),
-               (bx + 52 * u, by + 56 * u), (bx + 12 * u, by + 56 * u)],
-              fill=STEEL, outline=CREAM)
-    d.rectangle([bx + 27 * u, by + 38 * u, bx + 37 * u, by + 45 * u], fill=STEEL_DARK)
-    d.ellipse([bx + 39 * u, by + 1 * u, bx + 63 * u, by + 25 * u], fill=AMBER, outline=CREAM)
-    d.text((bx + 51 * u, by + 13 * u), "%", font=font(SANS_BOLD, int(15 * u)), fill=INK, anchor="mm")
-
-
-def g_asia(d, bx, by, s):
-    u = s / 64.0
-    d.rectangle([bx, by + 48 * u, bx + 64 * u, by + 64 * u], fill=(12, 17, 28))
-    _horizon(d, bx, by, u, 48, 90)
-    # contrail arc over the horizon
-    d.arc([bx + 20 * u, by + 30 * u, bx + 62 * u, by + 58 * u], 300, 20,
-          fill=(168, 188, 214), width=max(2, int(2 * u)))
-    d.arc([bx + 26 * u, by + 36 * u, bx + 56 * u, by + 54 * u], 300, 20,
-          fill=(120, 140, 170), width=1)
-    # missile
-    d.polygon([(bx + 33 * u, by + 3 * u), (bx + 40 * u, by + 20 * u),
-               (bx + 26 * u, by + 20 * u)], fill=CREAM)
-    d.rectangle([bx + 27 * u, by + 20 * u, bx + 39 * u, by + 45 * u], fill=(206, 198, 182))
-    d.rectangle([bx + 27 * u, by + 32 * u, bx + 39 * u, by + 37 * u], fill=CRIMSON)
-    d.polygon([(bx + 27 * u, by + 45 * u), (bx + 14 * u, by + 56 * u), (bx + 27 * u, by + 51 * u)], fill=CREAM)
-    d.polygon([(bx + 39 * u, by + 45 * u), (bx + 52 * u, by + 56 * u), (bx + 39 * u, by + 51 * u)], fill=CREAM)
-    d.rectangle([bx + 31 * u, by + 45 * u, bx + 35 * u, by + 55 * u], fill=AMBER)
-    # trefoil, top left
-    cx, cy, r = bx + 13 * u, by + 13 * u, 9.5 * u
-    for start in (0, 120, 240):
-        d.pieslice([cx - r, cy - r, cx + r, cy + r], start, start + 60, fill=AMBER)
-    d.ellipse([cx - 2.4 * u, cy - 2.4 * u, cx + 2.4 * u, cy + 2.4 * u], fill=INK)
-
-
-def g_europe(d, bx, by, s):
-    u = s / 64.0
-    d.rectangle([bx, by + 52 * u, bx + 64 * u, by + 64 * u], fill=(16, 24, 38))
-    _horizon(d, bx, by, u, 52, 70)
-    towers = ((2, 32, 13, 22), (17, 22, 12, 32), (31, 28, 11, 26), (44, 16, 10, 38), (56, 34, 8, 20))
-    for tx, ty, tw_, th in towers:
-        d.rectangle([bx + tx * u, by + ty * u, bx + (tx + tw_) * u, by + (ty + th) * u],
-                    fill=(52, 74, 110), outline=(120, 150, 190))
-        for r in range(2):
-            for c in range(2):
-                d.rectangle([bx + (tx + 2.5 + c * 5) * u, by + (ty + 4 + r * 9) * u,
-                             bx + (tx + 5 + c * 5) * u, by + (ty + 7 + r * 9) * u],
-                            fill=(232, 198, 130))
-    # smoke plume off the tallest block
-    for i, (sx, sy, sr) in enumerate(((50, 10, 5), (53, 4, 6), (58, -1, 5))):
-        d.ellipse([bx + (sx - sr) * u, by + (sy - sr) * u, bx + (sx + sr) * u, by + (sy + sr) * u],
-                  fill=(126 + i * 14, 134 + i * 14, 148 + i * 14))
-    # two missile streaks
-    for off in (0, 13):
-        d.line([(bx + (62 - off) * u, by + (2 + off * 0.6) * u),
-                (bx + (36 - off) * u, by + (22 + off * 0.6) * u)],
-               fill=AMBER, width=max(2, int(3 * u)))
-        d.polygon([(bx + (36 - off) * u, by + (22 + off * 0.6) * u),
-                   (bx + (43 - off) * u, by + (19 + off * 0.6) * u),
-                   (bx + (42 - off) * u, by + (28 + off * 0.6) * u)], fill=AMBER)
-
-
-def g_mideast(d, bx, by, s):
-    u = s / 64.0
-    d.rectangle([bx, by + 44 * u, bx + 64 * u, by + 64 * u], fill=(14, 26, 42))
-    for yy in (50, 58):
-        d.line([(bx + 4 * u, by + yy * u), (bx + 20 * u, by + yy * u)], fill=(70, 98, 130), width=1)
-        d.line([(bx + 30 * u, by + yy * u), (bx + 48 * u, by + yy * u)], fill=(70, 98, 130), width=1)
-    d.polygon([(bx + 4 * u, by + 38 * u), (bx + 60 * u, by + 38 * u),
-               (bx + 51 * u, by + 47 * u), (bx + 13 * u, by + 47 * u)],
-              fill=STEEL, outline=CREAM)
-    d.rectangle([bx + 38 * u, by + 30 * u, bx + 52 * u, by + 38 * u], fill=STEEL_DARK, outline=CREAM)
-    d.rectangle([bx + 42 * u, by + 22 * u, bx + 45 * u, by + 30 * u], fill=STEEL_DARK)
-    d.polygon([(bx + 22 * u, by + 38 * u), (bx + 17 * u, by + 24 * u), (bx + 22 * u, by + 27 * u),
-               (bx + 23 * u, by + 10 * u), (bx + 28 * u, by + 24 * u), (bx + 31 * u, by + 20 * u),
-               (bx + 32 * u, by + 38 * u)], fill=(226, 122, 48))
-    d.polygon([(bx + 23 * u, by + 38 * u), (bx + 23 * u, by + 20 * u), (bx + 26 * u, by + 27 * u),
-               (bx + 27 * u, by + 18 * u), (bx + 29 * u, by + 38 * u)], fill=(244, 198, 96))
-    cx, cy = bx + 54 * u, by + 55 * u
-    d.ellipse([cx - 4.6 * u, cy - 4.6 * u, cx + 4.6 * u, cy + 4.6 * u],
-              fill=(60, 68, 84), outline=AMBER, width=2)
-    for dx, dy in ((0, -8), (0, 8), (-8, 0), (8, 0), (-5.5, -5.5), (5.5, -5.5), (-5.5, 5.5), (5.5, 5.5)):
-        d.line([(cx + dx * 0.55 * u, cy + dy * 0.55 * u), (cx + dx * u, cy + dy * u)], fill=AMBER, width=2)
-
-
-# --------------------------------------------------------------------------
-# story cards
-# --------------------------------------------------------------------------
 
 CARDS = (
-    (16, 535, "TRADE", TAG_TRADE, CREAM,
-     "TARIFFS ON 14 TRADING PARTNERS",
-     "US proposes duties over \u2018excess industrial capacity\u2019; up to 20% on China", g_trade),
-    (520, 535, "ASIA", TAG_ASIA, CREAM,
-     "KIM ORDERS WIDER TACTICAL NUKES",
-     "North Korea expands nuclear material output, KCNA reports", g_asia),
-    (16, 661, "EUROPE", BLUE, CREAM,
-     "KYIV HIT BY BALLISTIC BARRAGE",
-     "Missiles strike a shopping centre and two buildings; Zelensky presses NATO", g_europe),
-    (520, 661, "MIDDLE EAST", ORANGE, CREAM,
-     "TANKERS BURN IN HORMUZ",
-     "Iran says two vessels hit mines in the strait and warns shipping", g_mideast),
+    ("TRADE", RED,
+     "US PROPOSES TARIFFS ON 14 TRADING PARTNERS",
+     "Duties over what Washington calls structural excess industrial capacity. "
+     "Up to 20% on China, 25% on India, 17% if a deal is struck. World stocks "
+     "slid as the AI rally faded.",
+     "Reuters \u00b7 RNZ \u00b7 SBS \u00b7 Business Standard"),
+    ("ASIA", BLUE,
+     "KIM ORDERS WIDER TACTICAL NUCLEAR DEPLOYMENT",
+     "Kim Jong Un inspected nuclear material production and weapons research "
+     "facilities and said the country should deploy tactical nuclear weapons "
+     "across multiple domains.",
+     "Reuters \u00b7 KCNA"),
+    ("EUROPE", BLUE,
+     "KYIV HIT BY BALLISTIC MISSILES",
+     "The strike late on Wednesday hit a shopping centre and two other "
+     "buildings; three people were injured, one seriously. Zelensky pressed "
+     "NATO on membership.",
+     "Reuters \u00b7 Kyiv Independent \u00b7 Ukrinform"),
+    ("MIDDLE EAST", RED,
+     "TANKERS BURN IN THE STRAIT OF HORMUZ",
+     "Iran\u2019s Revolutionary Guards said an LNG carrier and an oil tanker "
+     "caught fire after hitting naval mines. Tehran warned shipping to "
+     "follow its instructions.",
+     "Reuters \u00b7 Arab News \u00b7 Gulf News"),
+    ("AFRICA", RED,
+     "EGYPT FIRE KILLS 31 ON CAIRO RING ROAD",
+     "A vehicle carrying petroleum products overturned and caught fire. "
+     "21 people were wounded.",
+     "Reuters \u00b7 AP"),
+    ("SCIENCE", BLUE,
+     "HERA FINDS A STADIUM-SIZED CRATER ON DIMORPHOS",
+     "ESA released the first images from its Hera probe, showing the crater "
+     "left by NASA\u2019s 2022 DART impact across the asteroid\u2019s whole "
+     "width. Dimorphos is tumbling.",
+     "ESA \u00b7 CNN \u00b7 Ars Technica \u00b7 Sci. Am."),
 )
-CARD_W, CARD_H = 488, 120
-GLYPH = 76
-
-
-def draw_card(d, x, y, tag, tag_col, tag_ink, headline, deck, glyph):
-    d.rectangle([x, y, x + CARD_W, y + CARD_H], fill=(16, 25, 42), outline=RULE, width=2)
-
-    chip_f = font(SANS_BOLD, 13)
-    chip_w = tw(tag, chip_f, 1.8) + 20
-    d.rounded_rectangle([x + 14, y + 9, x + 14 + chip_w, y + 29], radius=4, fill=tag_col)
-    tracked(d, (x + 24, y + 24), tag, chip_f, tag_ink, 1.8)
-
-    glyph(d, x + CARD_W - 8 - GLYPH, y + 8, GLYPH)
-
-    text_w = CARD_W - 14 - 8 - GLYPH - 14
-    head_f = fit_block(headline, SANS_BOLD, text_w, 2, 26)
-    hy = y + 52
-    for line in split_two(headline, head_f, text_w):
-        tracked(d, (x + 14, hy), line, head_f, CREAM, 0.3)
-        hy += int(head_f.size * 1.06)
-
-    deck_f = fit_block(deck, SANS, CARD_W - 34, 2, 16)
-    dy = y + 95
-    for line in split_two(deck, deck_f, CARD_W - 34):
-        d.text((x + 14, dy), line, font=deck_f, fill=(220, 212, 198), anchor="ls")
-        dy += int(deck_f.size * 1.10)
-    return hy, dy
-
-
-# --------------------------------------------------------------------------
-# also on the day
-# --------------------------------------------------------------------------
 
 BRIEFS = (
-    ("EGYPT", "31 KILLED IN FUEL-TRUCK FIRE ON CAIRO RING ROAD"),
-    ("SPACE", "HERA FINDS STADIUM-SIZED CRATER ON ASTEROID DIMORPHOS"),
-    ("BANGLADESH", "GARMENT WAGE RAISED 36% TO 17,000 TAKA AFTER PROTESTS"),
-    ("BRAZIL", "FLOODS AND LANDSLIDES KILL AT LEAST 8 IN THE SOUTH"),
-    ("SAUDI ARABIA", "HOUTHI PROJECTILE HITS JAZAN PORT, COALITION SAYS"),
-    ("CULTURE", "DURAN DURAN GUITARIST ANDY TAYLOR DIES AT 65"),
+    ("US", "SECOND JUDGE BLOCKS BIRTHRIGHT CITIZENSHIP ORDER"),
+    ("US", "SENATE DEMOCRAT QUESTIONS NVIDIA ON HUANG\u2019S RETURN"),
+    ("EU", "RUSSIA\u2019S MURMANSK GOVERNOR HELD ON CORRUPTION CHARGES"),
+    ("EU", "34 COUNTRIES URGE RUSSIA TO STOP USING RIOT GAS"),
+    ("EU", "ITALY: NEARLY 60 PRIESTS JAILED FOR ABUSE, REPORT SAYS"),
+    ("EU", "BULGARIA INTERCEPTS FIRST MIGRANT BOAT IN MONTHS"),
+    ("ME", "HOUTHI PROJECTILE HITS JAZAN PORT, COALITION SAYS"),
+    ("ME", "IS ATTACK KILLS TWO SYRIAN SECURITY PERSONNEL"),
+    ("ME", "IRAN SAYS IT CAN WITHSTAND A US NAVAL BLOCKADE"),
+    ("AF", "BANGLADESH RAISES GARMENT WAGE 36% TO 17,000 TAKA"),
+    ("AF", "NIGERIA: GUNMEN KILL AT LEAST 30 IN NIGER STATE"),
+    ("AF", "KENYA CULT LEADER CONVICTED ON NEW CHARGES"),
+    ("AS", "N KOREA EXPELS SWISS ENVOY OVER SANCTIONS"),
+    ("AS", "CHINA JOINS 3,000-TROOP DRILLS IN CAMBODIA"),
+    ("LA", "BRAZIL FLOODS AND LANDSLIDES KILL AT LEAST 8"),
+    ("LA", "ECUADOR AND US REVIEW JOINT OPERATIONS"),
+    ("CU", "DURAN DURAN GUITARIST ANDY TAYLOR DIES AT 65"),
+    ("SP", "SINDAROV AND GUKESH DRAW GAME 2 OF TITLE MATCH"),
 )
-BRIEF_TOP = 810
-BRIEF_PITCH = 26
-BRIEF_X = 152
-BRIEF_F = 25
 
-
-def draw_briefs(d, top):
-    tracked(d, (16, top), "ALSO ON THE DAY", font(SANS_BOLD, 18), AMBER, 3.4)
-    d.rectangle([178, top - 12, 1008, top - 11], fill=RULE)
-
-    label_f = font(SANS_BOLD, 14)
-    body_f = font(SANS_BOLD, BRIEF_F)
-    first = top + 30
-    for i in range(len(BRIEFS)):
-        if i % 2 == 1:
-            y = first + i * BRIEF_PITCH
-            d.rectangle([10, y - 19, SIDE - 10, y + 5], fill=(20, 27, 41))
-    for i in range(1, len(BRIEFS)):
-        y = first + i * BRIEF_PITCH - 19
-        d.rectangle([10, y, SIDE - 10, y + 1], fill=(38, 48, 68))
-    d.rectangle([140, first - 18, 141, first + (len(BRIEFS) - 1) * BRIEF_PITCH + 5], fill=RULE)
-    y = first
-    for label, headline in BRIEFS:
-        tracked(d, (16, y), label, label_f, AMBER, 1.2)
-        tracked(d, (BRIEF_X, y), headline, body_f, (228, 221, 207), 0.2)
-        y += BRIEF_PITCH
-    return y
-
-
-def draw_footer(d, top):
-    d.rectangle([16, top, 1008, top + 1], fill=RULE)
-    f = font(SANS, 14)
-    tracked(d, (16, top + 19),
-            "SOURCES: REUTERS \u00b7 AP \u00b7 AFP \u00b7 BBC \u00b7 KYIV INDEPENDENT \u00b7 ESA \u2014 CROSS-CHECKED",
-            f, DIM, 0.6)
-    tracked(d, (1008, top + 19), "make.fun \u00b7 news-image-20261126", f, AMBER, 0.6, anchor="r")
+FOOT_SRC = ("SOURCES: REUTERS \u00b7 AP \u00b7 AFP \u00b7 BBC \u00b7 KYIV INDEPENDENT "
+            "\u00b7 ESA \u00b7 UPI \u00b7 AL JAZEERA \u2014 EVERY ITEM CROSS-CHECKED "
+            "IN TWO OUTLETS")
+FOOT_MARK = "make.fun \u00b7 news-image-20261126"
 
 
 # --------------------------------------------------------------------------
-# print texture
+# the plan: every box measured before anything is drawn
 # --------------------------------------------------------------------------
 
-def grain_tile(n=64):
-    """A fixed arithmetic dot pattern, tiled over the page at a few percent."""
-    tile = Image.new("RGBA", (n, n), (0, 0, 0, 0))
-    px = tile.load()
-    for y in range(n):
-        for x in range(n):
-            v = (x * 13 + y * 29 + (x * y) * 7) % 101
-            if v < 11:
-                px[x, y] = (255, 252, 244, 17)
-            elif v > 91:
-                px[x, y] = (0, 0, 0, 13)
-    return tile
+def plan():
+    p = {}
+
+    # masthead band ---------------------------------------------------------
+    p["flag_base"] = 28
+    p["mast_size"] = fit_size("THE DAILY LEDGER", SERIF_BOLD, MR - ML, 104, 60)
+    p["mast_base"] = 116
+    p["rule1"] = 124
+    p["rule2"] = 131
+    p["date_size"] = 46
+    p["date_base"] = 170
+    p["flag_rule"] = 179
+
+    # lead text -------------------------------------------------------------
+    p["kick_base"] = LEAD_TOP + 22
+    p["kick_rule"] = LEAD_TOP + 29
+    hf = fit_block(LEAD_HEAD, SERIF_BOLD, TEXT_R - TEXT_L, 2, 42, floor=28)
+    p["head_f"] = hf.size
+    p["head_lines"] = split_two(LEAD_HEAD, hf, TEXT_R - TEXT_L)
+    p["head_lh"] = int(hf.size * 1.08)
+    p["head_base0"] = p["kick_rule"] + 6 + int(hf.size * 0.80)
+    p["head_bot"] = (p["head_base0"] + (len(p["head_lines"]) - 1) * p["head_lh"]
+                     + int(hf.size * 0.24))
+
+    df = fit_block(LEAD_DECK, SANS, TEXT_R - TEXT_L, 5, 17, floor=12)
+    p["deck_f"] = df.size
+    p["deck_lines"] = wrap(LEAD_DECK, df, TEXT_R - TEXT_L)
+    p["deck_lh"] = int(df.size * 1.22)
+    p["deck_base0"] = p["head_bot"] + 12 + int(df.size * 0.78)
+    p["deck_bot"] = (p["deck_base0"] + (len(p["deck_lines"]) - 1) * p["deck_lh"]
+                     + int(df.size * 0.24))
+
+    p["body_rule"] = p["deck_bot"] + 8
+    p["body_half"] = (TEXT_R - TEXT_L - 26) / 2.0
+    pf = font(SANS, 12)
+    p["body1"] = wrap(LEAD_P1, pf, p["body_half"])
+    p["body2"] = wrap(LEAD_P2, pf, p["body_half"])
+    p["body_lh"] = 14
+    p["body_base0"] = p["body_rule"] + 14
+    p["body_bot"] = (p["body_base0"]
+                     + (max(len(p["body1"]), len(p["body2"])) - 1) * p["body_lh"] + 10)
+
+    # six columns -----------------------------------------------------------
+    cols = []
+    for tag, tagc, headline, deck, src in CARDS:
+        c = {"tag": tag, "colour": tagc}
+        c["tag_base"] = COL_TOP + 14
+        ch = fit_block(headline, SANS_BOLD, COL_W, 3, 21, floor=12)
+        c["head_f"] = ch.size
+        c["head_lines"] = wrap(headline, ch, COL_W)
+        c["head_lh"] = int(ch.size * 1.04)
+        c["head_base0"] = c["tag_base"] + 12 + int(ch.size * 0.78)
+        c["head_bot"] = (c["head_base0"] + (len(c["head_lines"]) - 1) * c["head_lh"]
+                         + int(ch.size * 0.26))
+        cd = fit_block(deck, SANS, COL_W, 4, 12, floor=9)
+        c["deck_f"] = cd.size
+        c["deck_lines"] = wrap(deck, cd, COL_W)
+        c["deck_lh"] = int(cd.size * 1.18)
+        c["deck_base0"] = c["head_bot"] + 6 + int(cd.size * 0.74)
+        c["deck_bot"] = (c["deck_base0"] + (len(c["deck_lines"]) - 1) * c["deck_lh"]
+                         + int(cd.size * 0.26))
+        sf = fit_block(src, SANS, COL_W, 2, 8, floor=7)
+        c["src_f"] = sf.size
+        c["src_lines"] = wrap(src, sf, COL_W)
+        c["src_lh"] = int(sf.size * 1.25)
+        c["src_base0"] = c["deck_bot"] + 7 + int(sf.size * 0.75)
+        c["src_bot"] = (c["src_base0"] + (len(c["src_lines"]) - 1) * c["src_lh"] + 4)
+        cols.append(c)
+    p["cols"] = cols
+
+    # the day in brief ------------------------------------------------------
+    p["brief_title_base"] = BRIEF_TOP + 16
+    p["brief_rule"] = BRIEF_TOP + 24
+    stacks = []
+    per = math.ceil(len(BRIEFS) / N_BRIEF_COLS)
+    for col in range(N_BRIEF_COLS):
+        stack = []
+        base = p["brief_rule"] + 16
+        for tag, headline in BRIEFS[col * per:(col + 1) * per]:
+            tf = font(SANS_BOLD, 11)
+            tag_w = tw(tag, tf, 1.0)
+            avail = BRIEF_W - (tag_w + 16)
+            bf = fit_block(headline, SANS_BOLD, avail, 2, 12, floor=10)
+            lines = wrap(headline, bf, avail)
+            lh = int(bf.size * 1.16)
+            block = len(lines) * lh
+            stack.append({"tag": tag, "tag_w": tag_w, "f": bf.size, "lines": lines,
+                          "lh": lh, "base0": base,
+                          "bottom": base + block - bf.size + int(bf.size * 1.08)})
+            base += block + 8
+        stacks.append(stack)
+    p["brief_items"] = stacks
+    p["brief_bottoms"] = [s[-1]["bottom"] + 4 for s in stacks]
+    return p
 
 
-def apply_grain(page):
-    tile = grain_tile()
-    layer = Image.new("RGBA", page.size, (0, 0, 0, 0))
-    for ty in range(0, SIDE, tile.size[1]):
-        for tx in range(0, SIDE, tile.size[0]):
-            layer.alpha_composite(tile, (tx, ty))
-    page.alpha_composite(layer)
-
-
-def apply_halftone(page, top, height):
-    layer = Image.new("RGBA", (SIDE, height), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-    for row, y in enumerate(range(3, height - 2, 6)):
-        off = 0 if row % 2 == 0 else 3
-        for x in range(off, SIDE, 6):
-            d.ellipse([x, y, x + 1, y + 1], fill=(255, 238, 228, 20))
-    page.alpha_composite(layer, (0, top))
+P = plan()
 
 
 # --------------------------------------------------------------------------
-# layout audit
+# masthead band
+# --------------------------------------------------------------------------
+
+def draw_masthead(d):
+    tracked(d, ((ML + MR) / 2.0, P["flag_base"]), FLAG_LINE, font(SANS, 12), SOFT, 1.1,
+            anchor="c")
+    tracked(d, ((ML + MR) / 2.0, P["mast_base"]), "THE DAILY LEDGER",
+            font(SERIF_BOLD, P["mast_size"]), INK, 0.0, anchor="c")
+
+    d.rectangle([ML, P["rule1"], MR, P["rule1"] + 2], fill=INK)      # double rule
+    d.rectangle([ML, P["rule2"], MR, P["rule2"]], fill=INK)
+
+    tracked(d, ((ML + MR) / 2.0, P["date_base"]), DATE_LINE,
+            font(SANS_BOLD, P["date_size"]), INK, 2.5, anchor="c")
+    tracked(d, (MR, P["flag_base"]), XMAS_LINE, font(SANS_BOLD, 12), RED, 1.2, anchor="r")
+
+    d.rectangle([ML, P["flag_rule"], MR, P["flag_rule"]], fill=MUTED)
+
+
+# --------------------------------------------------------------------------
+# lead illustration: ink + one red spot on paper
+# --------------------------------------------------------------------------
+
+BLDGS = (
+    # (x fraction, width px, height px, window cols, lit-pattern seed)
+    (0.000, 38, 108, 2, 0), (0.115, 30, 76, 2, 1), (0.205, 44, 132, 3, 2),
+    (0.335, 26, 84, 1, 3), (0.410, 40, 116, 2, 4), (0.545, 32, 70, 2, 5),
+    (0.635, 46, 138, 3, 6), (0.790, 28, 88, 1, 7), (0.865, 40, 110, 2, 8),
+)
+
+UMBRELLAS = (0.03, 0.13, 0.22, 0.31, 0.42, 0.52, 0.61, 0.71, 0.80, 0.90, 0.97)
+
+
+def draw_lead_scene(page):
+    """Flat black skyline with cream lit windows, three red balloons heeling
+    in the wind on sagging tethers, diagonal rain, an umbrella crowd.
+    Chunky shapes, ink plus one red spot, no gradients."""
+    x0, y0 = SCENE_L, LEAD_TOP + 8
+    w, h = SCENE_R - SCENE_L, LEAD_BOT - 8 - y0
+    sc = Image.new("RGB", (w, h), PAPER)
+    d = ImageDraw.Draw(sc)
+
+    ground = h - 30                       # baseline of buildings and crowd
+
+    # night skyline: flat black slabs, a few windows punched out in paper
+    for i, (fx, bw, bh, wcols, seed) in enumerate(BLDGS):
+        bx = fx * w
+        top = ground - bh
+        d.rectangle([bx, top, bx + bw, ground], fill=INK)
+        if i % 3 == 1:                    # aerials on some roofs
+            ax = bx + bw * 0.5
+            d.line([(ax, top), (ax, top - 8)], fill=INK, width=2)
+        cw = (bw - 8) / wcols
+        rows = int((bh - 12) // 15)
+        for r in range(rows):
+            for c in range(wcols):
+                if (seed * 5 + r * 3 + c * 7) % 4 != 0:
+                    continue              # arithmetic pattern, ~25% lit
+                wx = bx + 4 + c * cw + cw * 0.22
+                wy = top + 7 + r * 15
+                d.rectangle([wx, wy, wx + cw * 0.5, wy + 6], fill=PAPER)
+
+    # diagonal rain: thin ink strokes slanting with the wind
+    for i in range(44):
+        rx = ((i * 173 + 29) % (w + 40)) - 20
+        ry = (i * 71 + 11) % (ground - 8)
+        ln = 11 + (i * 5) % 8
+        d.line([(rx, ry), (rx - ln * 0.45, ry + ln)], fill=INK, width=1)
+
+    # three balloons, all heeling the same way (wind from the right); each is
+    # drawn upright on a paper-filled tile and rotated about its centre
+    tilt = 14
+
+    # star balloon
+    sr, scx, scy = 30, w * 0.19, 62
+    t = sr * 3
+    tile = Image.new("RGB", (t, t), PAPER)
+    td = ImageDraw.Draw(tile)
+    pad = t / 2.0
+    pts = []
+    for i in range(10):
+        a = -math.pi / 2 + i * math.pi / 5
+        rad = sr if i % 2 == 0 else sr * 0.45
+        pts.append((pad + rad * math.cos(a), pad + rad * math.sin(a)))
+    td.polygon(pts, fill=RED, outline=INK)
+    td.polygon([(pad + (x - pad) * 0.5, pad + (y - pad) * 0.5) for x, y in pts], fill=PAPER)
+    td.polygon(pts, outline=INK)
+    sc.paste(tile.rotate(tilt, resample=Image.BICUBIC, center=(pad, pad)),
+             (int(scx - pad), int(scy - pad)))
+
+    # round-face balloon
+    fr, fcx, fcy = 26, w * 0.49, 70
+    t = fr * 3
+    tile = Image.new("RGB", (t, t), PAPER)
+    fpad = t / 2.0
+    td = ImageDraw.Draw(tile)
+    td.ellipse([fpad - fr, fpad - fr, fpad + fr, fpad + fr], fill=RED, outline=INK, width=3)
+    for sx in (-1, 1):                    # cream eyes, ink pupils
+        ex = fpad + sx * fr * 0.38
+        td.ellipse([ex - 5, fpad - fr * 0.34, ex + 5, fpad - fr * 0.10],
+                   fill=PAPER, outline=INK)
+        td.ellipse([ex - 2, fpad - fr * 0.28, ex + 2, fpad - fr * 0.16], fill=INK)
+    td.arc([fpad - fr * 0.45, fpad + fr * 0.02, fpad + fr * 0.45, fpad + fr * 0.52],
+           20, 160, fill=INK, width=3)
+    sc.paste(tile.rotate(tilt, resample=Image.BICUBIC, center=(fpad, fpad)),
+             (int(fcx - fpad), int(fcy - fpad)))
+
+    # capsule balloon
+    cw2, ch2, ccx, ccy = 19, 42, w * 0.80, 66
+    tile = Image.new("RGB", (cw2 * 5, int(ch2 * 2.6)), PAPER)
+    tp = (tile.size[0] / 2.0, tile.size[1] / 2.0)
+    td = ImageDraw.Draw(tile)
+    td.rounded_rectangle([tp[0] - cw2, tp[1] - ch2, tp[0] + cw2, tp[1] + ch2],
+                         radius=cw2, fill=RED, outline=INK, width=3)
+    for k in (-ch2 * 0.45, ch2 * 0.45):   # seam bands
+        td.rectangle([tp[0] - cw2 + 3, tp[1] + k - 2, tp[0] + cw2 - 3, tp[1] + k + 2],
+                     fill=PAPER)
+    td.ellipse([tp[0] - 7, tp[1] - 7, tp[0] + 7, tp[1] + 7], fill=PAPER, outline=INK)
+    sc.paste(tile.rotate(tilt, resample=Image.BICUBIC, center=tp),
+             (int(ccx - tile.size[0] / 2.0), int(ccy - tile.size[1] / 2.0)))
+
+    # sagging tethers down to the handlers' hands
+    for bx, by, hx in ((scx, scy + sr, scx - 30), (fcx, fcy + fr, fcx - 26),
+                       (ccx, ccy + ch2, ccx - 32)):
+        mid = ((bx + hx) / 2.0, (by + (ground - 4)) / 2.0 + 10)
+        curve = [((1 - t) * (1 - t) * bx + 2 * (1 - t) * t * mid[0] + t * t * hx,
+                  (1 - t) * (1 - t) * by + 2 * (1 - t) * t * mid[1] + t * t * (ground - 4))
+                 for t in [i / 24.0 for i in range(25)]]
+        d.line([(int(x), int(y)) for x, y in curve], fill=INK, width=2)
+
+    # crowd of umbrella silhouettes along the bottom
+    d.rectangle([0, ground + 26, w, h], fill=INK)          # kerb mass
+    for i, fx in enumerate(UMBRELLAS):
+        ux = fx * w
+        uy = ground + 6 + (i % 3) * 5
+        uw = 15 + (i % 4) * 3
+        d.pieslice([ux - uw, uy - uw * 0.8, ux + uw, uy + uw * 0.8], 180, 360, fill=INK)
+        d.line([(ux, uy), (ux, uy + 13)], fill=INK, width=2)
+
+    # the red spot: the wind itself, an arrow across the top of the frame
+    d.line([(w - 28, 16), (28, 16)], fill=RED, width=3)
+    d.polygon([(28, 16), (44, 9), (44, 23)], fill=RED)
+    tracked(d, (w - 30, 10), "GUSTS TO 55 MPH", font(SANS_BOLD, 10), RED, 1.0, anchor="r")
+
+    page.paste(sc, (x0, y0))
+    return (x0, y0, x0 + w, y0 + h)
+
+
+# --------------------------------------------------------------------------
+# lead text
+# --------------------------------------------------------------------------
+
+def draw_lead(d):
+    tracked(d, (TEXT_L, P["kick_base"]), LEAD_KICKER, font(SANS_BOLD, 17), RED, 1.4)
+    d.rectangle([TEXT_L, P["kick_rule"], TEXT_R, P["kick_rule"]], fill=MUTED)
+
+    hf = font(SERIF_BOLD, P["head_f"])
+    y = P["head_base0"]
+    for line in P["head_lines"]:
+        tracked(d, (TEXT_L, y), line, hf, INK, 0.0)
+        y += P["head_lh"]
+
+    df = font(SANS, P["deck_f"])
+    y = P["deck_base0"]
+    for line in P["deck_lines"]:
+        d.text((TEXT_L, y), line, font=df, fill=INK, anchor="ls")
+        y += P["deck_lh"]
+
+    d.rectangle([TEXT_L, P["body_rule"], TEXT_R, P["body_rule"]], fill=MUTED)
+    pf = font(SANS, 12)
+    y = P["body_base0"]
+    for line in P["body1"]:
+        d.text((TEXT_L, y), line, font=pf, fill=SOFT, anchor="ls")
+        y += P["body_lh"]
+    y = P["body_base0"]
+    for line in P["body2"]:
+        d.text((TEXT_L + P["body_half"] + 26, y), line, font=pf, fill=SOFT, anchor="ls")
+        y += P["body_lh"]
+
+
+# --------------------------------------------------------------------------
+# six story columns
+# --------------------------------------------------------------------------
+
+def draw_columns(d):
+    d.rectangle([ML, COL_TOP - 8, MR, COL_TOP - 7], fill=INK)
+    for dx in COL_DIV:
+        d.rectangle([dx, COL_TOP - 2, dx, COL_BOT - 6], fill=MUTED, width=1)
+
+    for i, c in enumerate(P["cols"]):
+        x = COL_XS[i]
+        tracked(d, (x, c["tag_base"]), c["tag"], font(SANS_BOLD, 14), c["colour"], 1.6)
+        d.rectangle([x, c["tag_base"] + 5, x + COL_W, c["tag_base"] + 5], fill=MUTED)
+
+        hf = font(SANS_BOLD, c["head_f"])
+        y = c["head_base0"]
+        for line in c["head_lines"]:
+            tracked(d, (x, y), line, hf, INK, 0.0)
+            y += c["head_lh"]
+
+        df = font(SANS, c["deck_f"])
+        y = c["deck_base0"]
+        for line in c["deck_lines"]:
+            d.text((x, y), line, font=df, fill=SOFT, anchor="ls")
+            y += c["deck_lh"]
+
+        sf = font(SANS, c["src_f"])
+        y = c["src_base0"]
+        for line in c["src_lines"]:
+            d.text((x, y), line, font=sf, fill=MUTED, anchor="ls")
+            y += c["src_lh"]
+
+
+# --------------------------------------------------------------------------
+# THE DAY IN BRIEF
+# --------------------------------------------------------------------------
+
+def draw_briefs(d):
+    d.rectangle([ML, BRIEF_TOP - 8, MR, BRIEF_TOP - 7], fill=INK)
+    tracked(d, (ML, P["brief_title_base"]), "THE DAY IN BRIEF",
+            font(SANS_BOLD, 18), INK, 3.0)
+    w = tw("THE DAY IN BRIEF", font(SANS_BOLD, 18), 3.0)
+    d.rectangle([ML + w + 12, BRIEF_TOP + 8, MR, BRIEF_TOP + 8], fill=MUTED)
+    tracked(d, (MR, P["brief_title_base"]), "ALL TIMES LOCAL \u00b7 18 ITEMS \u00b7 8 REGIONS",
+            font(SANS, 11), MUTED, 0.8, anchor="r")
+    d.rectangle([ML, P["brief_rule"], MR, P["brief_rule"]], fill=MUTED)
+
+    for dx in BRIEF_DIV:
+        d.rectangle([dx, P["brief_rule"] + 4, dx, BRIEF_BOT], fill=MUTED, width=1)
+
+    for col, stack in enumerate(P["brief_items"]):
+        x = BRIEF_XS[col]
+        for k, it in enumerate(stack):
+            tf = font(SANS_BOLD, 11)
+            tracked(d, (x, it["base0"]), it["tag"], tf, RED, 1.0)
+            d.rectangle([x + it["tag_w"] + 6, it["base0"] - 9,
+                         x + it["tag_w"] + 6, it["base0"] + 2], fill=MUTED)
+            hf = font(SANS_BOLD, it["f"])
+            y = it["base0"]
+            for line in it["lines"]:
+                d.text((x + it["tag_w"] + 16, y), line, font=hf, fill=INK, anchor="ls")
+                y += it["lh"]
+            if k < len(stack) - 1:
+                sep = it["bottom"] + 2
+                d.rectangle([x, sep, x + BRIEF_W, sep], fill=FAINT)
+
+
+# --------------------------------------------------------------------------
+# footer
+# --------------------------------------------------------------------------
+
+def draw_footer(d):
+    d.rectangle([ML, FOOT_RULE, MR, FOOT_RULE + 1], fill=INK)
+    tracked(d, (ML, FOOT_RULE + 18), FOOT_SRC, font(SANS, 10), SOFT, 0.3)
+    tracked(d, (MR, FOOT_RULE + 18), FOOT_MARK, font(SANS_BOLD, 10), RED, 0.3, anchor="r")
+
+
+# --------------------------------------------------------------------------
+# layout audit: nothing clips, nothing overlaps, ink stays in its band
 # --------------------------------------------------------------------------
 
 def audit():
-    """Re-measure every text block against its column; report any overflow."""
+    """Re-measure every text string against its column; report any overflow."""
     rows = []
+    rows.append(("flag line", tw(FLAG_LINE, font(SANS, 12), 1.1), MR - ML))
+    flag_w = tw(FLAG_LINE, font(SANS, 12), 1.1)
+    xmas_w = tw(XMAS_LINE, font(SANS_BOLD, 12), 1.2)
+    rows.append(("flag vs thanksgiving share row", (ML + MR) / 2.0 + flag_w / 2.0,
+                 MR - xmas_w - 12))
+    rows.append(("masthead", tw("THE DAILY LEDGER", font(SERIF_BOLD, P["mast_size"]), 0.0),
+                 MR - ML))
+    rows.append(("date line", tw(DATE_LINE, font(SANS_BOLD, P["date_size"]), 2.5), MR - ML))
+    rows.append(("thanksgiving", tw(XMAS_LINE, font(SANS_BOLD, 12), 1.2), 300))
 
-    mast = font(SERIF_BOLD, fit_size("THE DAILY LEDGER", SERIF_BOLD, 990, 88))
-    rows.append(("masthead", tw("THE DAILY LEDGER", mast), 992))
+    rows.append(("lead kicker", tw(LEAD_KICKER, font(SANS_BOLD, 17), 1.4), TEXT_R - TEXT_L))
+    hf = font(SERIF_BOLD, P["head_f"])
+    for i, line in enumerate(P["head_lines"]):
+        rows.append(("lead head l%d" % (i + 1), tw(line, hf), TEXT_R - TEXT_L))
+    df = font(SANS, P["deck_f"])
+    for i, line in enumerate(P["deck_lines"]):
+        rows.append(("lead deck l%d" % (i + 1), tw(line, df), TEXT_R - TEXT_L))
+    pf = font(SANS, 12)
+    for j, lines in enumerate((P["body1"], P["body2"])):
+        for i, line in enumerate(lines):
+            rows.append(("lead p%d l%d" % (j + 1, i + 1), tw(line, pf), P["body_half"]))
 
-    band = font(SANS_BOLD, fit_size("THURSDAY 26 NOVEMBER 2026", SANS_BOLD, 660, 42, tracking=2.0))
-    rows.append(("date band", tw("THURSDAY 26 NOVEMBER 2026", band, 2.0), 660))
-    rows.append(("thanksgiving", tw("THANKSGIVING DAY", font(SANS_BOLD, 18), 1.4), 300))
+    for c in P["cols"]:
+        tag = c["tag"]
+        rows.append(("%s tag" % tag, tw(tag, font(SANS_BOLD, 14), 1.6), COL_W))
+        hfn = font(SANS_BOLD, c["head_f"])
+        for i, line in enumerate(c["head_lines"]):
+            rows.append(("%s head l%d" % (tag, i + 1), tw(line, hfn), COL_W))
+        dfn = font(SANS, c["deck_f"])
+        for i, line in enumerate(c["deck_lines"]):
+            rows.append(("%s deck l%d" % (tag, i + 1), tw(line, dfn), COL_W))
+        sfn = font(SANS, c["src_f"])
+        for i, line in enumerate(c["src_lines"]):
+            rows.append(("%s src l%d" % (tag, i + 1), tw(line, sfn), COL_W))
 
-    head = font(SANS_BOLD, fit_size(HEAD_L2, SANS_BOLD, HEAD_MAX, 42, tracking=0.5))
-    for line in (HEAD_L1, HEAD_L2):
-        rows.append(("hero " + line[:12], tw(line, head, 0.5), HEAD_MAX))
+    rows.append(("brief header", tw("THE DAY IN BRIEF", font(SANS_BOLD, 18), 3.0), 420))
+    rows.append(("brief meta", tw("ALL TIMES LOCAL \u00b7 18 ITEMS \u00b7 8 REGIONS",
+                                  font(SANS, 11), 0.8), 300))
+    for stack in P["brief_items"]:
+        for it in stack:
+            tf = font(SANS_BOLD, 11)
+            rows.append(("brief tag " + it["tag"], tw(it["tag"], tf, 1.0), it["tag_w"] + 4))
+            bf = font(SANS_BOLD, it["f"])
+            avail = BRIEF_W - (it["tag_w"] + 16)
+            for i, line in enumerate(it["lines"]):
+                rows.append(("brief %s l%d" % (it["tag"] + line[:6], i + 1), tw(line, bf), avail))
 
-    deck_f = fit_block(HERO_DECK, SANS, DECK_MAX, DECK_LINES, 18)
-    for i, line in enumerate(balanced_wrap(HERO_DECK, deck_f, DECK_MAX, DECK_LINES)):
-        rows.append(("hero deck l%d" % (i + 1), tw(line, deck_f), DECK_MAX))
-
-    for x, y, tag, tag_col, tag_ink, headline, deck, glyph in CARDS:
-        text_w = CARD_W - 14 - 8 - GLYPH - 14
-        head_c = fit_block(headline, SANS_BOLD, text_w, 2, 26)
-        for i, line in enumerate(split_two(headline, head_c, text_w)):
-            rows.append(("card %s h%d" % (tag, i + 1), tw(line, head_c, 0.3), text_w))
-        body = fit_block(deck, SANS, CARD_W - 34, 2, 16)
-        for i, line in enumerate(split_two(deck, body, CARD_W - 34)):
-            rows.append(("card %s d%d" % (tag, i + 1), tw(line, body), CARD_W - 34))
-
-    body = font(SANS_BOLD, BRIEF_F)
-    label = font(SANS_BOLD, 14)
-    for tag, headline in BRIEFS:
-        rows.append(("brief " + tag, tw(headline, body, 0.2), 1008 - BRIEF_X))
-        rows.append(("label " + tag, 16 + tw(tag, label, 1.2), 132))
-
-    f = font(SANS, 14)
-    src = tw("SOURCES: REUTERS \u00b7 AP \u00b7 AFP \u00b7 BBC \u00b7 KYIV INDEPENDENT \u00b7 ESA \u2014 CROSS-CHECKED", f, 0.6)
-    mark = tw("make.fun \u00b7 news-image-20261126", f, 0.6)
-    rows.append(("footer left", src, 1008 - 16 - mark - 30))
-    rows.append(("footer right", mark, 400))
+    rows.append(("footer src", tw(FOOT_SRC, font(SANS, 10), 0.3),
+                 (MR - ML) - tw(FOOT_MARK, font(SANS_BOLD, 10), 0.3) - 24))
+    rows.append(("footer mark", tw(FOOT_MARK, font(SANS_BOLD, 10), 0.3), 300))
     return rows
 
 
 def vertical_checks():
-    """Bands must not collide; type must stay inside its own panel."""
-    checks = []
-    band_bottom = BAND_TOP + BAND_H
-    checks.append(("hero below band", band_bottom + 8, HERO[1]))
-    checks.append(("cards below hero", HERO[3] + 4, CARDS[0][1]))
-    checks.append(("cards row2 gap", CARDS[0][1] + CARD_H + 4, CARDS[2][1]))
-    checks.append(("briefs below cards", CARDS[2][1] + CARD_H + 8, BRIEF_TOP - 13))
-    last_brief = BRIEF_TOP + 30 + (len(BRIEFS) - 1) * BRIEF_PITCH
-    checks.append(("footer below briefs", last_brief + 10, 980))
-    checks.append(("footer in page", 980 + 19 + 4, SIDE))
+    """Bands must not collide and every block's ink must stay inside its band."""
+    ck = []
+    ck.append(("flag cap above page", 4, P["flag_base"] - 10))
+    ck.append(("masthead below flag", P["flag_base"] + 4,
+               P["mast_base"] - int(P["mast_size"] * 0.76)))
+    ck.append(("masthead above rule1", P["mast_base"] + 4, P["rule1"]))
+    ck.append(("rule1 above rule2", P["rule1"] + 3, P["rule2"]))
+    ck.append(("date below rule2", P["rule2"] + 2,
+               P["date_base"] - int(P["date_size"] * 0.76)))
+    ck.append(("date above foot rule", P["date_base"] + 4, P["flag_rule"]))
+    ck.append(("lead below flag rule", P["flag_rule"] + 2, LEAD_TOP))
+    ck.append(("kicker inside lead", LEAD_TOP + 8, P["kick_base"] - 14))
+    ck.append(("head below kicker rule", P["kick_rule"] + 2,
+               P["head_base0"] - int(P["head_f"] * 0.80)))
+    ck.append(("deck below head", P["head_bot"] + 2,
+               P["deck_base0"] - int(P["deck_f"] * 0.78)))
+    ck.append(("body below deck", P["deck_bot"] + 2, P["body_rule"]))
+    ck.append(("body inside lead", P["body_bot"], LEAD_BOT - 4))
+    ck.append(("columns below lead", LEAD_BOT + 2, COL_TOP - 8))
 
-    head = font(SANS_BOLD, fit_size(HEAD_L2, SANS_BOLD, HEAD_MAX, 42, tracking=0.5))
-    head_bottom = SCRIM_TOP + 76 + int(head.size * 1.10)
-    checks.append(("headline above scrim floor", head_bottom + 6, HERO[3]))
-    checks.append(("kicker inside scrim", SCRIM_TOP + 28, SCRIM_TOP + 76 - head.size))
+    for c in P["cols"]:
+        tag = c["tag"]
+        ck.append(("col %s head below tag" % tag, c["tag_base"] + 6,
+                   c["head_base0"] - int(c["head_f"] * 0.78)))
+        ck.append(("col %s deck below head" % tag, c["head_bot"] + 2,
+                   c["deck_base0"] - int(c["deck_f"] * 0.74)))
+        ck.append(("col %s src below deck" % tag, c["deck_bot"] + 2,
+                   c["src_base0"] - int(c["src_f"] * 0.75)))
+        ck.append(("col %s inside band" % tag, c["src_bot"], COL_BOT - 8))
 
-    deck_c = fit_block(HERO_DECK, SANS, DECK_MAX, DECK_LINES, 18)
-    dlines = balanced_wrap(HERO_DECK, deck_c, DECK_MAX, DECK_LINES)
-    lh_d = int(deck_c.size * 1.24)
-    cap_c = int(deck_c.size * 0.72)
-    total = (len(dlines) - 1) * lh_d + cap_c
-    d_top = SCRIM_TOP + 22 + max(0, (SCRIM_H - 22 - total) // 2)
-    checks.append(("deck starts on solid scrim", SCRIM_TOP + 22, d_top))
-    checks.append(("deck inside scrim", d_top + total, SCRIM_TOP + SCRIM_H - 4))
+    ck.append(("brief below columns", COL_BOT - 6, BRIEF_TOP - 8))
+    for i, bottom in enumerate(P["brief_bottoms"]):
+        ck.append(("brief col %d floor" % (i + 1), bottom, BRIEF_BOT))
+    ck.append(("footer below briefs", BRIEF_BOT + 2, FOOT_RULE))
+    ck.append(("footer inside page", FOOT_RULE + 18 + 4, SIDE - 6))
+    return ck
 
-    for x, y, tag, tag_col, tag_ink, headline, deck, glyph in CARDS:
-        body = fit_block(deck, SANS, CARD_W - 34, 2, 16)
-        lines = split_two(deck, body, CARD_W - 34)
-        deck_bottom = y + 95 + (len(lines) - 1) * int(body.size * 1.10) + 4
-        checks.append(("card %s deck floor" % tag, deck_bottom, y + CARD_H - 3))
-        text_w = CARD_W - 14 - 8 - GLYPH - 14
-        head_c = fit_block(headline, SANS_BOLD, text_w, 2, 26)
-        hl = len(split_two(headline, head_c, text_w))
-        head_bottom = y + 52 + (hl - 1) * int(head_c.size * 1.06)
-        checks.append(("card %s head/deck gap" % tag, head_bottom + 6, y + 95 - 8))
-    return checks
+
+def scene_checks(box):
+    """The illustration must sit inside its box, clear of the text column."""
+    x0, y0, x1, y1 = box
+    return [("scene right of divider", DIV_X + 4, x0),
+            ("scene left of divider", x1, SCENE_R),
+            ("scene top in band", LEAD_TOP, y0),
+            ("scene bottom in band", y1, LEAD_BOT - 4)]
 
 
 # --------------------------------------------------------------------------
 
 def render():
-    page = Image.new("RGBA", (SIDE, SIDE), BG + (255,))
+    page = Image.new("RGB", (SIDE, SIDE), PAPER)
     d = ImageDraw.Draw(page)
 
-    rule_y = draw_head(d)
-    draw_date_band(d, BAND_TOP)
-    draw_hero(page)
+    draw_masthead(d)
+    draw_lead(d)
+    box = draw_lead_scene(page)
     d = ImageDraw.Draw(page)
-    for x, y, tag, tag_col, tag_ink, headline, deck, glyph in CARDS:
-        draw_card(d, x, y, tag, tag_col, tag_ink, headline, deck, glyph)
-    draw_briefs(d, BRIEF_TOP)
-    draw_footer(d, 980)
-
-    apply_halftone(page, BAND_TOP, BAND_H)
-    apply_grain(page)
-    return page.convert("RGB")
+    d.rectangle([DIV_X, LEAD_TOP, DIV_X, LEAD_BOT], fill=MUTED, width=1)
+    draw_columns(d)
+    draw_briefs(d)
+    draw_footer(d)
+    return page, box
 
 
 def main():
-    img = render()
+    img, box = render()
+
     rows = audit()
     overflow = [r for r in rows if r[1] > r[2]]
     worst = max(rows, key=lambda r: r[1] / r[2] if r[2] else 0)
     for label, used, limit in overflow:
-        print("OVERFLOW %-22s %6.1f > %6.1f" % (label, used, limit))
+        print("OVERFLOW %-30s %6.1f > %6.1f" % (label, used, limit))
     if overflow:
         raise SystemExit("%d text block(s) overflow their column" % len(overflow))
     print("text audit: %d blocks fit, tightest %s at %.0f/%.0f px"
           % (len(rows), worst[0], worst[1], worst[2]))
 
-    checks = vertical_checks()
+    checks = vertical_checks() + scene_checks(box)
     bad = [c for c in checks if c[1] > c[2]]
     for label, used, limit in bad:
-        print("COLLISION %-26s %6.1f > %6.1f" % (label, used, limit))
+        print("COLLISION %-30s %6.1f > %6.1f" % (label, used, limit))
     if bad:
         raise SystemExit("%d layout band(s) collide" % len(bad))
     print("layout audit: %d bands clear" % len(checks))
@@ -959,6 +779,8 @@ def main():
     img.save(main_path, format="PNG", optimize=True)
     with open(main_path, "rb") as fh:
         blob = fh.read()
+    if len(blob) > 1_048_576:
+        raise SystemExit("entry.png is %d bytes, over the 1 MiB gate" % len(blob))
     with open(os.path.join(out_dir, "entry.png"), "wb") as fh:
         fh.write(blob)
     print("wrote entry.png and output/entry.png: %d bytes, %dx%d"

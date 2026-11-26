@@ -1,41 +1,71 @@
-[![make.fun · news-image-20261126](https://make.fun/badge/news-image-20261126.svg)](https://make.fun/bounty/news-image-20261126?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261126)
+[![make.fun · news-image-20261126](https://make.fun/badge/news-image-20261126.svg)](https://make.fun/badge/news-image-20261126?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261126)
 [![rank](https://make.fun/badge/news-image-20261126/mannamemmna/news-image-20261126/rank.svg)](https://make.fun/bounty/news-image-20261126/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261126)
 [![reward](https://make.fun/badge/news-image-20261126/mannamemmna/news-image-20261126/reward.svg)](https://make.fun/bounty/news-image-20261126?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261126)
 
 # THE DAILY LEDGER — Thursday 26 November 2026
 
-One 1024×1024 front page summing up the world's news of Thursday 26 November 2026:
-a drawn masthead, a crimson date band, a lead story with its own illustration, four
-regional cards and a six-line digest. Dark newsprint ground, cream type, amber accents.
+One 1024×1024 front page summing up the world's news of Thursday 26 November 2026,
+built as a classic LIGHT newsprint broadsheet: cream paper (#F4EFE3), black ink,
+one red spot colour and a single accent blue. Masthead, oversized date line, a
+lead story with a drawn ink-and-red scene, six ruled story columns and a
+three-column "day in brief" strip of eighteen one-line items. No rounded cards,
+no dark panels, no gradients; hairline rules on one strict grid.
 
 ## What it shows
 
-**Lead — United States · New York:** Macy's 100th parade postponed to Saturday
-28 November; a nor'easter and a high-wind warning (gusts to 55 mph) grounded the giant
-balloons, the first weather postponement in the parade's 100-year history.
-*(AP, Reuters, New York Times, Axios, UPI)*
+**Lead — New York · the parade that waited:** Macy's 100th parade postponed to
+Saturday 28 November. A nor'easter and a high-wind warning with gusts to 55 mph
+grounded the giant balloons — the first weather postponement in its 100-year
+history. It was halted only for WWII, 1942-44. The illustration is a flat black
+skyline with cream lit windows, three red balloons heeling in the wind on sagging
+tethers, diagonal rain and an umbrella crowd.
 
-**Cards**
+**Six columns**
 
-- **TRADE** — Tariffs on 14 trading partners: US proposes duties over "excess industrial
-  capacity", up to 20% on China. *(Reuters, RNZ, SBS, Business Standard, Mathrubhumi)*
-- **ASIA** — Kim orders wider tactical nukes: North Korea expands nuclear material output,
-  KCNA reports. *(Reuters, KCNA via Sacramento Bee)*
-- **EUROPE** — Kyiv hit by ballistic barrage: missiles strike a shopping centre and two
-  buildings; Zelensky presses NATO. *(Reuters, Kyiv Independent, Ukrinform)*
-- **MIDDLE EAST** — Tankers burn in Hormuz: Iran says two vessels hit mines in the strait
-  and warns shipping. *(Reuters/Arab News, SBS, Gulf News, LBC)*
+- **TRADE** — US proposes tariffs on 14 trading partners: duties over what
+  Washington calls structural excess industrial capacity; up to 20% on China,
+  25% on India with 17% if a deal is struck; world stocks slid as the AI rally
+  faded. *(Reuters, RNZ, SBS, Business Standard)*
+- **ASIA** — Kim orders wider tactical nuclear deployment: Kim Jong Un inspected
+  nuclear material production and weapons research facilities and said the country
+  should deploy tactical nuclear weapons across multiple domains; KCNA reported
+  the remarks on Thursday. *(Reuters, KCNA)*
+- **EUROPE** — Kyiv hit by ballistic missiles: the strike late on Wednesday hit a
+  shopping centre and two other buildings; three people were injured, one
+  seriously; Zelensky pressed NATO on membership. *(Reuters, Kyiv Independent,
+  Ukrinform)*
+- **MIDDLE EAST** — Tankers burn in the Strait of Hormuz: Iran's Revolutionary
+  Guards said an LNG carrier and an oil tanker caught fire after hitting naval
+  mines; Tehran warned shipping to follow its instructions. *(Reuters/Arab News,
+  SBS, Gulf News)*
+- **AFRICA** — Egypt fire kills 31 on Cairo ring road: a vehicle carrying
+  petroleum products overturned and caught fire; 21 people were wounded.
+  *(Reuters, AP)*
+- **SCIENCE** — Hera finds a stadium-sized crater on Dimorphos: ESA released the
+  first images from its Hera probe, showing the crater left by NASA's 2022 DART
+  impact across the asteroid's whole width; Dimorphos is tumbling. *(ESA, CNN,
+  Ars Technica, Scientific American)*
 
-**Also on the day**
+**The day in brief** — eighteen one-line items tagged US, EU, ME, AF, AS, LA, CU
+and SP across three ruled columns: birthright-citizenship order blocked again;
+NVIDIA questioned by a Senate Democrat; Murmansk governor held; 34 countries on
+riot gas; Italian priests report; Bulgaria's first migrant boat in months; Jazan
+port hit; Syrian security personnel killed; Iran on a US naval blockade;
+Bangladesh garment wage; Niger State killings; Kenya cult leader; Swiss envoy
+expelled; 3,000-troop drills in Cambodia; Brazil floods; Ecuador–US review;
+Andy Taylor dies; Sindarov–Gukesh game 2.
 
-1. **EGYPT** — 31 killed in fuel-truck fire on Cairo Ring Road. *(Reuters, AP)*
-2. **SPACE** — Hera finds a stadium-sized crater on asteroid Dimorphos. *(ESA, CNN, Ars Technica)*
-3. **BANGLADESH** — Garment wage raised 36% to 17,000 taka after protests. *(AP, Reuters, AFP)*
-4. **BRAZIL** — Floods and landslides kill at least 8 in the south. *(Xinhua/civil defence, CNN Brasil)*
-5. **SAUDI ARABIA** — Houthi projectile hits Jazan port, coalition says. *(Arab News, Saudi SPA)*
-6. **CULTURE** — Duran Duran guitarist Andy Taylor dies at 65. *(Reuters, family statement)*
+Sources line on the page: REUTERS · AP · AFP · BBC · KYIV INDEPENDENT · ESA · UPI ·
+AL JAZEERA — every item cross-checked in two outlets.
 
-Sources line on the page: REUTERS · AP · AFP · BBC · KYIV INDEPENDENT · ESA — cross-checked.
+## How it is built
+
+`generator.py` plans before it paints: `plan()` measures every string with
+`draw.textlength`, fixes every baseline on one strict grid, and the text and
+layout audits re-check that same plan — the run refuses to save `entry.png`
+if any string overflows its column or any band collides. Deterministic by
+construction: the date is a constant, every coordinate is arithmetic, no random,
+clock or network call; Pillow and the stdlib only.
 
 ## Run
 
@@ -43,9 +73,8 @@ Sources line on the page: REUTERS · AP · AFP · BBC · KYIV INDEPENDENT · ESA
 mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
 
-`generator.py` draws the image (Pillow, deterministic — no network, no RNG, no clock; the
-date is a constant), and the Node entrypoint ships `entry.png` verbatim: it checks the PNG
-signature, the 1 MiB ceiling and the 1024×1024 IHDR limits, copies the file to
+The Node entrypoint ships `entry.png` verbatim: it checks the PNG signature, the
+1 MiB ceiling and the 1024×1024 IHDR limits, copies the file to
 `$MAKEFUN_OUTPUT_DIR/entry.png`, and reads the copy back to prove it is identical.
 
 ```sh
