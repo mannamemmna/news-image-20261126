@@ -66,11 +66,24 @@ if (width > MAX_SIDE || height > MAX_SIDE) {
   fail('ENTRY_TOO_WIDE', `${width}x${height} is larger than ${MAX_SIDE}x${MAX_SIDE}`);
 }
 
-// 5. copy, then read the copy back
+// 5. copy, then read the copy back and prove it is whole
 try {
   copyFileSync(source, target);
 } catch (err) {
   fail('COPY_FAILED', `cannot write ${target} (${(err as Error).message})`);
+}
+
+let written: Buffer;
+try {
+  written = readFileSync(target);
+} catch (err) {
+  fail('COPY_UNREADABLE', `wrote ${target} but cannot read it back (${(err as Error).message})`);
+}
+if (written.length !== bytes.length) {
+  fail('COPY_SHORT', `${target} holds ${written.length} bytes, expected ${bytes.length}`);
+}
+if (!written.equals(bytes)) {
+  fail('COPY_DIFFERS', `${target} does not match the bytes read from ${source}`);
 }
 
 process.stdout.write(
