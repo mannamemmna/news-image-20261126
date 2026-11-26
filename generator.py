@@ -23,7 +23,7 @@ SANS = os.path.join(FONT_DIR, "DejaVuSans.ttf")
 # Palette: deep navy ground, cream type, one crimson band, amber accents.
 BG = (11, 18, 32)
 CREAM = (242, 235, 220)
-CREAM_SOFT = (204, 196, 180)
+CREAM_SOFT = (216, 208, 192)
 DIM = (128, 136, 152)
 RULE = (58, 68, 86)
 CRIMSON = (142, 27, 27)
@@ -142,14 +142,15 @@ def draw_date_band(d, top, height=64):
 def _balloon_star(d, cx, cy, r):
     pts = []
     for i in range(10):
-        ang = -math.pi / 2 + i * math.pi / 5
+        ang = -math.pi / 2 + i * math.pi / 5 + 0.20
         rad = r if i % 2 == 0 else r * 0.44
         pts.append((cx + rad * math.cos(ang), cy + rad * math.sin(ang)))
     d.polygon(pts, fill=(226, 178, 72), outline=CREAM)
 
 
 def _balloon_head(d, cx, cy, r):
-    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(214, 96, 84), outline=CREAM)
+    d.ellipse([cx - r * 1.08, cy - r * 0.94, cx + r * 1.08, cy + r * 0.94],
+              fill=(214, 96, 84), outline=CREAM)
     d.ellipse([cx - r * 0.44, cy - r * 0.34, cx - r * 0.12, cy + r * 0.00], fill=INK)
     d.ellipse([cx + r * 0.12, cy - r * 0.34, cx + r * 0.44, cy + r * 0.00], fill=INK)
     d.arc([cx - r * 0.44, cy + r * 0.04, cx + r * 0.44, cy + r * 0.58], 15, 165, fill=INK, width=3)
@@ -175,12 +176,14 @@ def draw_hero_scene(d, box):
     h = y1 - y0
     ground = y1 - 12
 
-    for fx, fy, fl in ((0.03, 0.06, 0.20), (0.30, 0.14, 0.19),
-                       (0.62, 0.10, 0.20), (0.34, 0.52, 0.17)):
+    for fx, fy, fl in ((0.02, 0.05, 0.24), (0.28, 0.13, 0.22),
+                       (0.60, 0.09, 0.24), (0.02, 0.44, 0.20)):
         ax = x0 + fx * w
         ay = y0 + fy * h
-        d.line([(ax, ay), (ax + fl * w * 0.55, ay - 6), (ax + fl * w, ay - 2)],
-               fill=(148, 160, 180), width=3)
+        d.line([(ax, ay), (ax + fl * w * 0.5, ay - 7), (ax + fl * w * 0.86, ay - 3)],
+               fill=(150, 162, 182), width=3)
+        d.line([(ax + fl * w * 0.86, ay - 3), (ax + fl * w, ay - 8)],
+               fill=(150, 162, 182), width=3)
 
     blocks = (
         (0.00, 0.15, 0.30, 0.10),
@@ -213,13 +216,13 @@ def draw_hero_scene(d, box):
 
     d.rectangle([x0, ground, x1, ground + 2], fill=(152, 160, 174))
 
-    _tether(d, (x0 + 0.21 * w, y0 + 0.33 * h), ground)
-    _tether(d, (x0 + 0.53 * w, y0 + 0.39 * h), ground)
-    _tether(d, (x0 + 0.80 * w, y0 + 0.47 * h), ground)
+    _tether(d, (x0 + 0.19 * w, y0 + 0.36 * h), ground)
+    _tether(d, (x0 + 0.52 * w, y0 + 0.42 * h), ground)
+    _tether(d, (x0 + 0.82 * w, y0 + 0.50 * h), ground)
 
-    _balloon_star(d, x0 + 0.21 * w, y0 + 0.24 * h, 0.100 * w)
-    _balloon_head(d, x0 + 0.53 * w, y0 + 0.28 * h, 0.086 * w)
-    _balloon_tube(d, x0 + 0.80 * w, y0 + 0.32 * h, 0.064 * w, 0.24 * h)
+    _balloon_star(d, x0 + 0.19 * w, y0 + 0.23 * h, 0.115 * w)
+    _balloon_head(d, x0 + 0.52 * w, y0 + 0.27 * h, 0.098 * w)
+    _balloon_tube(d, x0 + 0.82 * w, y0 + 0.31 * h, 0.072 * w, 0.26 * h)
 
     bx, by = x0 + 2, y0 + 2
     d.ellipse([bx, by, bx + 32, by + 32], fill=CRIMSON, outline=CREAM)
@@ -403,12 +406,13 @@ def draw_briefs(d, top):
     tracked(d, (16, top), "ALSO ON THE DAY", font(SANS_BOLD, 18), AMBER, 3.4)
     d.rectangle([178, top - 12, 1008, top - 11], fill=RULE)
 
-    label_f = font(SANS_BOLD, 13)
+    label_f = font(SANS_BOLD, 14)
     body_f = font(SANS_BOLD, 23)
+    d.rectangle([148, top + 10, 149, top + 10 + 5 * 32 + 8], fill=RULE)
     y = top + 32
     for label, headline in BRIEFS:
         tracked(d, (16, y), label, label_f, AMBER, 1.2)
-        tracked(d, (150, y), headline, body_f, CREAM, 0.2)
+        tracked(d, (158, y), headline, body_f, CREAM, 0.2)
         y += 32
     return y
 
@@ -455,8 +459,10 @@ def audit():
             rows.append(("card %s d%d" % (tag, i + 1), tw(line, body), CARD_W - 28))
 
     body = font(SANS_BOLD, 23)
-    for label, headline in BRIEFS:
-        rows.append(("brief " + label, tw(headline, body, 0.2), 1008 - 150))
+    label = font(SANS_BOLD, 14)
+    for tag, headline in BRIEFS:
+        rows.append(("brief " + tag, tw(headline, body, 0.2), 1008 - 158))
+        rows.append(("label " + tag, 16 + tw(tag, label, 1.2), 146))
     return rows
 
 
